@@ -1,0 +1,17 @@
+{
+  "design_authority": "Only the HWP in 설계서 is authoritative; earlier docs are excluded.",
+  "sources": [
+    {
+      "path": "설계서\\(CodingAnt팀)설계서_v1.0(엄윤종,심주혜,신재우,조현준,최의찬).hwp",
+      "sha256": "e691c1a2507f47a79032531f72d690d5438022d3c5d1ec8a296e6ab9199ab9f0"
+    },
+    {
+      "path": "구현 전도표\\1팀-진도표v1.0(v5)-엄윤종-심주혜-신재우-조현준-최의찬.hwpx",
+      "sha256": "335fa2b15587f5fdce0cc70689c7a2e3348457ded030ea16ab8fa246d2327258"
+    },
+    {
+      "path": "DB 스키마파일\\easyq_schema_v1.2.sql",
+      "sha256": "033100408f0ca6cf053524f177e5f42949dde94df6b1cc8d04101c41dc781eff"
+    }
+  ]
+}

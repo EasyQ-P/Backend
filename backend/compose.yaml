@@ -1,0 +1,52 @@
+# Run from backend: docker compose up --build
+# Uses an independently provisioned PostgreSQL 16 + pgvector; does not create a DB.
+services:
+  auth:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: [uvicorn, easyq.auth_app:app, --host, 0.0.0.0, --port, "8000", --no-access-log, --proxy-headers]
+    environment:
+      # Client IP for per-IP rate limits comes from Caddy's X-Forwarded-For. Safe only
+      # because no host port is published: just Caddy on easyq-network reaches :8000.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
+      DATABASE_URL: ${AUTH_DATABASE_URL:?Set auth role DSN}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      CODE_HMAC_KEY: ${CODE_HMAC_KEY}
+      DELIVERY_ENCRYPTION_KEY: ${DELIVERY_ENCRYPTION_KEY}
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY}
+      WORKER_SERVICE_KEY: ${WORKER_SERVICE_KEY}
+      STORAGE_BACKEND: local
+      OBJECT_ROOT: /app/var/objects
+    networks: [easyq]
+    restart: unless-stopped
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: [uvicorn, easyq.backend_app:app, --host, 0.0.0.0, --port, "8000", --no-access-log, --proxy-headers]
+    env_file: .env
+    environment:
+      DATABASE_URL: ${BACKEND_DATABASE_URL:?Set backend role DSN}
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
+    volumes: [objects:/app/var/objects]
+    networks: [easyq]
+    restart: unless-stopped
+  worker:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: ${WORKER_DATABASE_URL:?Set worker role DSN}
+      INTERNAL_SERVICE_KEY: ${WORKER_SERVICE_KEY}
+    command: [python, -m, easyq.worker]
+    volumes: [objects:/app/var/objects]
+    networks: [easyq]
+    restart: unless-stopped
+volumes:
+  objects:
+networks:
+  easyq:
+    name: easyq-network

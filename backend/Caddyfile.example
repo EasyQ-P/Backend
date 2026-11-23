@@ -1,0 +1,19 @@
+# Merge these matchers into the existing frontend Caddy configuration.
+# The frontend container must join easyq-network. Internal/health/docs are private.
+easyq.example.com {
+    @auth path /api/v1/users /api/v1/auth/* /api/v1/me
+    handle @auth {
+        reverse_proxy auth:8000
+    }
+    handle /api/v1/* {
+        reverse_proxy backend:8000
+    }
+    handle /internal/* {
+        respond 404
+    }
+    handle {
+        root * /srv/frontend
+        try_files {path} /index.html
+        file_server
+    }
+}

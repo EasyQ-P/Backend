@@ -13,6 +13,7 @@ EasyQ: 강연 중 청중 질문에 교안 · 발화 근거로 AI가 답하고, �
 - 원본: `설계서/(CodingAnt팀)설계서_v1.0(엄윤종,심주혜,신재우,조현준,최의찬).hwp`
 - 백엔드 v1.2 반영본: `docs/CodingAnt팀_설계서_v1.0_백엔드v1.2반영.hwpx` (읽을 때는 압축을 풀어 `Contents/section0.xml`의 `<hp:t>` 텍스트를 뽑는다)
 - DB 스키마: `DB 스키마파일/easyq_schema_v1.2.sql`
+- **AI팀 협업 규칙: `docs/EasyQ_AI팀_협업규칙.md`** — 교안 추출 · 정리 · 청킹(400토큰), 발화 30초, retrieval 패키지 · 학습서버 연동 경계. 교안 처리 · 발화 색인 · 검색 · 판정 · 학습서버 작업 전에 먼저 읽는다.
 - 참고: `docs/EasyQ_팀공유_보류사항.md`, `docs/EasyQ_통합검토_유스케이스_API.md`, `docs/EasyQ_Mermaid_원본.md`
 
 주로 보는 절:

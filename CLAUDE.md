@@ -70,8 +70,8 @@ backend/                  backend(API, 8000)와 worker가 같은 코드 · 이�
 ## 핵심 규칙
 
 ### 실행 단위와 경계
-- auth만 비밀번호 해시 · 인증 코드 · 재설정 토큰 검증값을 읽고 쓴다. backend는 `auth_session_view`(세션 해시 · 만료 · 폐기, 회원 상태 · 역할 · 이메일 인증, 게스트 참가 상태)만 읽는다. DB 계정은 auth · backend · worker 별로 최소 권한.
-- backend → auth는 내부 API(`/internal/v1`, 게스트 세션 발급 INT-01 · 세션 폐기 INT-02)로만. `/internal/v1/*`은 Caddy가 프록시하지 않는다.
+- auth만 비밀번호 해시 · 인증 코드 · 재설정 토큰 검증값을 읽고 쓴다. backend는 세션을 `auth_session_view`(세션 해시 · CSRF 해시 · 생성 · 만료 · 폐기, 회원 상태 · 역할 · 이메일 인증, 게스트 참가 상태)로만 읽는다. DB 계정은 auth · backend · worker 별로 최소 권한(`DB 스키마파일/easyq_grants_v1.3.sql`, 회원 표는 비밀번호 해시를 뺀 열 단위 권한).
+- backend → auth는 내부 API(`/internal/v1`, 게스트 세션 발급 INT-01 · 세션 폐기 INT-02 · HOST 세션 연장 INT-03)로만. `/internal/v1/*`은 Caddy가 프록시하지 않는다.
 - 공개 경로 분기(7.1.4): `POST /api/v1/users`, `/api/v1/auth/*`, 정확히 `GET·PATCH /api/v1/me` → auth. `/api/v1/me/questions`, `POST /api/v1/me/consents`와 나머지 `/api/v1`, `/api/v1/ws` → backend.
 - auth가 죽어도 이미 발급된 세션으로 강연 · 질문은 계속 동작해야 한다. RDS 확인 실패 시 인증 불허.
 - 학습서버 호출은 정해진 API만 부르는 어댑터로. 임의 URL · 명령 · 파일 경로를 입력받지 않는다. `X-API-Key`는 backend · worker만 갖고 로그에 남기지 않는다. 주소는 `TRAINING_API_BASE_URL`(Docker bridge 호스트:9000 SSH 터널).
@@ -82,7 +82,7 @@ backend/                  backend(API, 8000)와 worker가 같은 코드 · 이�
 - 변경 요청: 인증 쿠키 + Origin 검사 + `X-CSRF-Token`. 가입 · 인증 메일 · 인증 확인 · 로그인 · 입장 · 재설정 · CSRF 재발급은 Origin 검사만.
 - 비동기: `202 {resource_id, job_id, status}` + `Location: /api/v1/jobs/{job_id}`. 비동기 POST는 `Idempotency-Key` 필수(다른 본문이면 409 `IDEMPOTENCY_CONFLICT`).
 - 강연 · 질문 상태 변경은 `If-Match`(version). 서빙 전환은 `expected_active_deployment_id`.
-- 요청 한도는 가입 · 로그인 · 인증 메일 · 코드 확인 · 재설정 메일 · 입장 코드에만, 카운터는 RDS(`auth_rate_limits`). 질문 API에는 걸지 않는다.
+- 요청 한도는 가입 · 로그인 · 인증 메일 · 코드 확인 · 재설정 메일 · 입장 코드 · 현재 비밀번호 확인(API-10)에만, 카운터는 RDS(`auth_rate_limits`). 질문 API에는 걸지 않는다.
 - 응답에 내부 FK · 토큰 해시 · S3 키를 넣지 않는다. 개인 답변 · 필기 · 관리자 응답은 별도 스키마로 직렬화한다.
 - 인증 쿠키 `easyq_session`: Secure · HttpOnly · SameSite=Lax · Path=/, DB에는 토큰 해시만.
 

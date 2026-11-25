@@ -103,7 +103,9 @@ class HTTPApplication:
         if status != 204:
             base_headers['Content-Type'] = 'application/json; charset=utf-8'
         base_headers['Content-Length'] = str(len(payload))
-        await send({'type': 'http.response.start', 'status': status, 'headers': [(k.lower().encode(), v.encode('latin1')) for k, v in base_headers.items()]})
+        # A header value may be a list (several Set-Cookie lines in one response).
+        raw_headers = [(k.lower().encode(), item.encode('latin1')) for k, v in base_headers.items() for item in (v if isinstance(v, list) else [v])]
+        await send({'type': 'http.response.start', 'status': status, 'headers': raw_headers})
         await send({'type': 'http.response.body', 'body': payload})
 
 

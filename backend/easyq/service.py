@@ -49,14 +49,13 @@ class Service:
             raise error
         if isinstance(result.data, dict) and result.data.pop('_guest_exchange', False):
             pid = result.data['participant_id']
-            marker = pid + '.' + credential_hash(self.settings.hmac_key, 'guest-retry', result.data['session_id'], pid)
-            retry_cookie = 'easyq_join_retry=' + marker + '; Path=/api/v1/participations; HttpOnly; SameSite=Lax; Max-Age=600' + ('; Secure' if self.settings.cookie_secure else '')
+            retry_cookie = self.join_retry_cookie(result.data['session_id'], pid)
             try:
                 exchange = self.guest_client.issue(pid, uid())
             except Exception:
                 raise APIError(503, 'AUTH_SERVICE_UNAVAILABLE', headers={'Set-Cookie': retry_cookie}) from None
             result.data.update(csrf_token=exchange['csrf_token'], expires_at=exchange['expires_at'])
-            result.headers['Set-Cookie'] = exchange['set_cookie']
+            result.headers['Set-Cookie'] = [exchange['set_cookie'], retry_cookie]
         if mode == 'backend' and isinstance(result.data, dict) and result.data.get('my_role') == 'HOST' and result.data.get('status') == 'LIVE' and hasattr(self.guest_client, 'renew'):
             try:
                 with self.db.transaction() as tx:
@@ -69,18 +68,36 @@ class Service:
                 pass  # Existing valid sessions keep working while auth is down.
         return result
 
+    JOIN_RETRY_SECONDS = 24 * 3600  # same as guest authentication (7.1.1: 24 hours after entry)
+
+    def join_retry_cookie(self, sid, pid):
+        """Entry-confirmation cookie (7.1.1): finds the same guest participant again; never authenticates."""
+        expires = int(self.clock().timestamp()) + self.JOIN_RETRY_SECONDS
+        signature = credential_hash(self.settings.hmac_key, 'guest-retry', sid, f'{pid}:{expires}')
+        return (f'easyq_join_retry={pid}.{expires}.{signature}; Path=/api/v1/participations; HttpOnly; SameSite=Lax; '
+                f'Max-Age={self.JOIN_RETRY_SECONDS}' + ('; Secure' if self.settings.cookie_secure else ''))
+
+    def join_retry_participant(self, sid, marker):
+        parts = marker.split('.')
+        if len(parts) != 3 or not parts[1].isdigit() or int(parts[1]) <= self.clock().timestamp():
+            return None
+        pid, expires, signature = parts
+        if not hmac.compare_digest(signature, credential_hash(self.settings.hmac_key, 'guest-retry', sid, f'{pid}:{expires}')):
+            return None
+        return uuid_value(pid)
+
     def event(self, tx, event_type, payload, sid=None):
         row = tx.one("""INSERT INTO ws_events(event_type,payload,session_id,expires_at)
             VALUES(%s,%s,%s,%s) RETURNING event_id""",
             (event_type, dumps(payload), sid, self.clock() + timedelta(hours=24)))
         tx.notify(row['event_id'])
 
-    def job(self, tx, kind, target, key, payload, user=None, sid=None, participant=None, when=None):
+    def job(self, tx, kind, target, key, payload, user=None, sid=None, participant=None, when=None, client_key=None, request_hash=None):
         jid = uid()
-        tx.execute("""INSERT INTO jobs(job_id,job_type,target_id,idempotency_key,payload,
+        tx.execute("""INSERT INTO jobs(job_id,job_type,target_id,idempotency_key,client_request_key,request_hash,payload,
             requested_by,session_id,participant_id,available_at)
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (jid, kind, target, key, dumps(payload), user, sid, participant, when or self.clock()))
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (jid, kind, target, key, client_key, request_hash, dumps(payload), user, sid, participant, when or self.clock()))
         return jid
 
     def rate(self, tx, purpose, identity, limit, seconds=3600, gap=0, count=True):
@@ -236,7 +253,7 @@ class Service:
         service = consent(b['consents']['SERVICE'])
         training = consent(b['consents'].get('TRAINING', {'policy_version': 'training-v1', 'granted': False}))
         if not service['granted']:
-            raise APIError(422, 'CONSENT_REQUIRED')
+            raise APIError(403, 'CONSENT_REQUIRED')
         self.mail_rate(tx, address, req.ip)
         tx.lock('email:' + address)
         if tx.one('SELECT user_id FROM users WHERE email=%s', (address,)):
@@ -330,7 +347,8 @@ class Service:
 
     def participant(self, tx, sid, principal):
         column, value = ('user_id', principal['user_id']) if principal['user_id'] else ('participant_id', principal['participant_id'])
-        return tx.one(f"SELECT * FROM participants WHERE session_id=%s AND {column}=%s AND status='ACTIVE' AND archived=false", (sid, value))
+        # archived = the lecture is in the member's archive (8.2.8); guests are always false.
+        return tx.one(f"SELECT * FROM participants WHERE session_id=%s AND {column}=%s AND status='ACTIVE' AND (kind='GUEST' OR archived=true)", (sid, value))
 
     def session_public(self, tx, s, p, include_code=False):
         keys = ['session_id', 'title', 'description', 'scheduled_at', 'host_display_name', 'status', 'stt_status', 'end_reason',
@@ -349,6 +367,14 @@ class Service:
 
     def participant_count(self, tx, sid):
         return tx.one("SELECT count(*) AS n FROM participants WHERE session_id=%s AND status='ACTIVE'", (sid,))['n']
+
+    def capacity_count(self, tx, sid):
+        """Capacity 50 (7.3.3 API-19): members, and guests with a live session or joined in the last 10 minutes."""
+        now = self.clock()
+        return tx.one("""SELECT count(*) AS n FROM participants p WHERE p.session_id=%s AND p.status='ACTIVE'
+            AND (p.kind='MEMBER' OR p.joined_at > %s OR EXISTS (SELECT 1 FROM auth_session_view v
+                 WHERE v.participant_id=p.participant_id AND v.revoked_at IS NULL AND v.expires_at > %s))""",
+            (sid, now - timedelta(minutes=10), now))['n']
 
     def code(self, tx):
         # Serialize allocation across current and immediately revoked code namespaces.
@@ -447,19 +473,21 @@ class Service:
         self.check_invalid_join_rate(tx, ip)
         s = tx.one('SELECT * FROM lecture_sessions WHERE join_code=%s FOR UPDATE', (code,))
         if not s:
-            self.rate(tx, 'invalid-join', ip, 20, 900)
+            self.rate(tx, 'invalid-join', ip, self.INVALID_JOIN_LIMIT, 900)
             bucket = credential_hash(self.settings.hmac_key, 'rate', 'invalid-join', ip)
-            tx.execute('UPDATE auth_rate_limits SET expires_at=%s WHERE bucket_key=%s AND request_count>=20', (self.clock() + timedelta(minutes=15), bucket))
+            tx.execute('UPDATE auth_rate_limits SET expires_at=%s WHERE bucket_key=%s AND request_count>=%s', (self.clock() + timedelta(minutes=15), bucket, self.INVALID_JOIN_LIMIT))
             revoked = tx.one('SELECT session_id FROM lecture_sessions WHERE previous_join_code=%s', (code,))
             raise APIError(410 if revoked else 404, 'JOIN_CODE_REVOKED' if revoked else 'JOIN_CODE_INVALID', commit=True)
         if s['status'] not in ('DRAFT', 'LIVE') or s['host_deleted_at']:
             raise APIError(409, 'SESSION_ENDED', commit=True)
         return s
 
+    INVALID_JOIN_LIMIT = 100  # 7.1.2: classrooms share one IP
+
     def check_invalid_join_rate(self, tx, ip):
         bucket = credential_hash(self.settings.hmac_key, 'rate', 'invalid-join', ip)
         row = tx.one('SELECT * FROM auth_rate_limits WHERE bucket_key=%s ORDER BY window_start DESC LIMIT 1', (bucket,))
-        if row and row['request_count'] >= 20 and dt(row['expires_at']) > self.clock():
+        if row and row['request_count'] >= self.INVALID_JOIN_LIMIT and dt(row['expires_at']) > self.clock():
             raise APIError(429, 'RATE_LIMITED', commit=True, headers={'Retry-After': str(max(1, int((dt(row['expires_at']) - self.clock()).total_seconds())))})
 
     def guest_retry_id(self, sid, key):
@@ -486,10 +514,8 @@ class Service:
             marker = req.cookies.get('easyq_join_retry', '')
             if key:
                 retry_pid = self.guest_retry_id(sid, uuid_value(key))
-            elif '.' in marker:
-                candidate, signature = marker.split('.', 1)
-                if hmac.compare_digest(signature, credential_hash(self.settings.hmac_key, 'guest-retry', sid, candidate)):
-                    retry_pid = uuid_value(candidate)
+            elif marker:
+                retry_pid = self.join_retry_participant(sid, marker)
         if retry_pid:
             tx.lock('guest:' + retry_pid)
             prior = tx.one('SELECT * FROM participants WHERE participant_id=%s', (retry_pid,))
@@ -501,7 +527,7 @@ class Service:
         if user_id and not existing:
             # UNIQUE(session_id,user_id) covers REVOKED/archived rows too: reactivate instead of inserting.
             previous = tx.one('SELECT * FROM participants WHERE session_id=%s AND user_id=%s', (sid, user_id))
-        if not existing and self.participant_count(tx, sid) >= 50:
+        if not existing and self.capacity_count(tx, sid) >= 50:
             raise APIError(409, 'SESSION_FULL')
         if user_id:
             self.require_service(tx, user=user_id)
@@ -520,11 +546,11 @@ class Service:
             pid = str(existing['participant_id'])
         elif previous:
             pid = str(previous['participant_id'])
-            tx.execute("UPDATE participants SET status='ACTIVE',archived=false WHERE participant_id=%s", (pid,))
+            tx.execute("UPDATE participants SET status='ACTIVE',archived=true WHERE participant_id=%s", (pid,))
         else:
             pid = retry_pid or uid()
-            tx.execute("""INSERT INTO participants(participant_id,session_id,user_id,kind,nickname)
-                VALUES(%s,%s,%s,%s,%s)""", (pid, sid, user_id, 'MEMBER' if user_id else 'GUEST', nickname))
+            tx.execute("""INSERT INTO participants(participant_id,session_id,user_id,kind,nickname,archived)
+                VALUES(%s,%s,%s,%s,%s,%s)""", (pid, sid, user_id, 'MEMBER' if user_id else 'GUEST', nickname, bool(user_id)))
         if not user_id:
             self.save_consent(tx, 'SERVICE', self.entrance_consent(b['service_consent'], 'SERVICE'), participant=pid, sid=sid)
         if not user_id or 'training_consent' in b:
@@ -656,7 +682,7 @@ class Service:
                 raise APIError(403, 'FORBIDDEN')
             csrf = token()
             tx.execute('UPDATE auth_sessions SET csrf_token_hash=%s WHERE auth_session_id=%s', (digest(csrf), p['auth_session_id']))
-            self.event(tx, 'csrf.updated', {'auth_session_id': str(p['auth_session_id'])})
+            self.event(tx, 'auth.csrf_rotated', {'auth_session_id': str(p['auth_session_id'])})
             return Result(200, {'csrf_token': csrf})
         if path == '/me' and method == 'GET':
             user_id = self.member(p)
@@ -732,10 +758,9 @@ class Service:
                 self.event(tx, 'session.updated', {'stt_status': 'STOPPED'}, sid)
             if sid and purpose == 'SERVICE':
                 if owner:
+                    # 7.3.3 API-20: LIVE ends (end_reason HOST); DRAFT stays and API-16 start re-checks SERVICE.
                     if s['status'] == 'LIVE':
                         self.end(tx, s)
-                    else:
-                        raise APIError(409, 'SESSION_STATE_CONFLICT')
                 else:
                     g = self.participant(tx, sid, p)
                     tx.execute("UPDATE participants SET status='REVOKED' WHERE participant_id=%s", (g['participant_id'],))
@@ -754,13 +779,15 @@ class Service:
         filename, media, content = req.file
         validate_document(filename, media, content, self.settings)
         key = uuid_value(req.headers.get('idempotency-key'))
-        job_key = 'ingest:' + str(p['user_id']) + ':' + sid + ':' + key
+        # 7.1.2 / 8.2.28: client key = HMAC(subject, job type, key); request_hash = body hash.
+        client_key = credential_hash(self.settings.hmac_key, 'idempotency', str(p['user_id']) + ':INGEST', key)
         import hashlib
-        fingerprint = hashlib.sha256(content + filename.encode() + media.encode()).hexdigest()
-        tx.lock(job_key)
-        prior = tx.one('SELECT * FROM jobs WHERE idempotency_key=%s', (job_key,))
+        file_hash = hashlib.sha256(content).hexdigest()
+        fingerprint = hashlib.sha256(content + filename.encode() + media.encode() + sid.encode()).hexdigest()
+        tx.lock('idempotency:' + client_key)
+        prior = tx.one('SELECT * FROM jobs WHERE client_request_key=%s', (client_key,))
         if prior:
-            if obj(prior['payload'])['fingerprint'] != fingerprint:
+            if prior['request_hash'] != fingerprint:
                 raise APIError(409, 'IDEMPOTENCY_CONFLICT')
             return Result(202, {'resource_id': prior['target_id'], 'job_id': prior['job_id'], 'status': prior['status']}, {'Location': '/api/v1/jobs/' + str(prior['job_id'])})
         did = uid()
@@ -768,8 +795,8 @@ class Service:
         req._staged_object = object_key
         self.storage.put(object_key, content, media)
         # Object keys are generated; the user filename never becomes a filesystem path.
-        tx.execute("""INSERT INTO documents(document_id,session_id,file_name,object_key,media_type,size_bytes,stage)
-            VALUES(%s,%s,%s,%s,%s,%s,'UPLOADED')""", (did, sid, filename, object_key, media, len(content)))
-        jid = self.job(tx, 'INGEST', did, job_key, {'fingerprint': fingerprint}, user=str(p['user_id']), sid=sid)
+        tx.execute("""INSERT INTO documents(document_id,session_id,file_name,object_key,media_type,size_bytes,sha256,stage)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,'UPLOADED')""", (did, sid, filename, object_key, media, len(content), file_hash))
+        jid = self.job(tx, 'INGEST', did, 'ingest:' + did, {}, user=str(p['user_id']), sid=sid, client_key=client_key, request_hash=fingerprint)
         self.event(tx, 'document.updated', {'document_id': did, 'status': 'PENDING', 'stage': 'UPLOADED'}, sid)
         return Result(202, {'resource_id': did, 'job_id': jid, 'status': 'QUEUED'}, {'Location': '/api/v1/jobs/' + jid})

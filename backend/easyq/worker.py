@@ -225,8 +225,10 @@ class Worker:
                         month_bounds(self.service.clock())[1] if held else self.service.clock() + timedelta(seconds=30 * 2 ** (job['attempts'] - 1)), self.service.clock() if failed or held else None,
                         job['job_id'], job['lease_token']))
                     if job['job_type'] == 'INGEST':
-                        tx.execute('UPDATE documents SET status=%s,error_code=%s WHERE document_id=%s', ('FAILED' if failed or held else 'PENDING', code, job['target_id']))
-                        self.service.event(tx, 'document.updated', {'document_id': str(job['target_id']), 'status': 'FAILED' if failed or held else 'PENDING', 'error_code': code}, str(job['session_id']))
+                        # 6.3.5: a budget-held document stays PENDING with error_code BUDGET_EXCEEDED until the cap is lifted.
+                        doc_status = 'FAILED' if failed and not held else 'PENDING'
+                        tx.execute('UPDATE documents SET status=%s,error_code=%s WHERE document_id=%s', (doc_status, code, job['target_id']))
+                        self.service.event(tx, 'document.updated', {'document_id': str(job['target_id']), 'status': doc_status, 'error_code': code}, str(job['session_id']))
         finally:
             stop.set()
             heartbeat.join(timeout=1)

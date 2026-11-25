@@ -1,11 +1,11 @@
 {
-  "executed_at_utc": "2026-11-23T16:16:54.558145+00:00",
-  "duration_seconds": 10.625,
-  "total": 98,
-  "passed": 48,
+  "executed_at_utc": "2026-11-25T13:19:43.255351+00:00",
+  "duration_seconds": 70.514,
+  "total": 104,
+  "passed": 104,
   "failed": 0,
   "errors": 0,
-  "skipped": 50,
+  "skipped": 0,
   "offline_harness": "Actual ASGI decoder + SQL service; SQLite type/lock adaptations; fake external providers",
   "postgresql": "Enabled only with EASYQ_TEST_DATABASE_URL naming a dedicated *_test database",
   "cases": [
@@ -15,6 +15,10 @@
     },
     {
       "test": "tests.test_api.APITests.test_budget_holds_ingest_before_call_and_resumes_after_cap_disabled",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_api.APITests.test_capacity_ignores_guests_without_live_session",
       "status": "passed"
     },
     {
@@ -62,6 +66,10 @@
       "status": "passed"
     },
     {
+      "test": "tests.test_api.APITests.test_guest_entry_cookie_finds_same_participant_after_session_cookie_loss",
+      "status": "passed"
+    },
+    {
       "test": "tests.test_api.APITests.test_guest_idempotency_key_cannot_take_over_another_guest",
       "status": "passed"
     },
@@ -70,11 +78,15 @@
       "status": "passed"
     },
     {
+      "test": "tests.test_api.APITests.test_host_service_withdrawal_keeps_draft_and_blocks_start",
+      "status": "passed"
+    },
+    {
       "test": "tests.test_api.APITests.test_host_session_renewal_requires_valid_owner_and_fifteen_minute_interval",
       "status": "passed"
     },
     {
-      "test": "tests.test_api.APITests.test_invalid_join_code_locks_ip_after_twenty_failures",
+      "test": "tests.test_api.APITests.test_invalid_join_code_locks_ip_after_hundred_failures",
       "status": "passed"
     },
     {
@@ -203,253 +215,215 @@
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_auto_end_executes_after_twelve_hours",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_budget_holds_ingest_before_call_and_resumes_after_cap_disabled",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_postgres.PostgreSQLTests.test_capacity_ignores_guests_without_live_session",
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_capacity_is_fifty_and_member_reentry_is_idempotent",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_chunking_preserves_pages_and_embedding_shape",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_code_expiry_and_reuse",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_concurrent_joins_cannot_exceed_capacity",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_csrf_rotation_invalidates_old_value",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_document_bad_format_and_oversize_rejected",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_ended_lecture_rejects_existing_guest_cookie_before_auth_revocation",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_ending_rejects_new_guests_and_sets_ninety_day_retention",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_expired_session_is_rejected",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_failed_guest_auth_retry_does_not_duplicate_participant",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_final_hwp_boolean_guest_consent_example",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_guest_can_join_draft_and_is_scoped_to_lecture",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_postgres.PostgreSQLTests.test_guest_entry_cookie_finds_same_participant_after_session_cookie_loss",
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_guest_idempotency_key_cannot_take_over_another_guest",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_guest_of_ended_lecture_can_join_another_lecture",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_postgres.PostgreSQLTests.test_host_service_withdrawal_keeps_draft_and_blocks_start",
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_host_session_renewal_requires_valid_owner_and_fifteen_minute_interval",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
-      "test": "tests.test_postgres.PostgreSQLTests.test_invalid_join_code_locks_ip_after_twenty_failures",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "test": "tests.test_postgres.PostgreSQLTests.test_invalid_join_code_locks_ip_after_hundred_failures",
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_invalid_member_cookie_still_requires_login_to_join",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_join_link_rotation_revokes_immediate_previous_code",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_lecture_creation_matches_final_design_and_state_start_needs_no_document",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_liveness_does_not_require_database",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_login_does_not_issue_more_verification_mail",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_login_requires_verified_account_and_wrong_password_hides_status",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_mail_rate_returns_retry_after",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_malformed_json_and_wrong_process_do_not_execute",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_member_can_rejoin_after_withdrawing_lecture_service_consent",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_native_postgresql_indexes",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_password_reset_is_single_use_and_revokes_all_sessions",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_password_reset_unknown_email_uses_same_response",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_pptx_expanded_size_guard",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_real_pdf_parser_extracts_text_and_rejects_scan_without_text",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_registration_is_atomic_and_stores_only_protected_credentials",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_registration_rollback_on_storage_error",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_resend_revokes_old_code_without_changing_password",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_s3_equivalent_object_removed_on_sql_failure",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_signup_optional_refusal_allows_later_lecture_training_grant",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_signup_validation_and_origin",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_stale_lease_cannot_finish_job",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_stt_consent_is_host_only_and_connecting_is_not_running",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_successful_logins_do_not_consume_failed_login_quota",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_training_withdrawal_overrides_older_lecture_grant",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_upload_allowed_while_live",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_upload_worker_indexes_pptx_and_idempotency_conflicts",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_verification_consumed_once",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_version_and_owner_checks",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_worker_dependency_failure_retries_then_records_failure",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_worker_key_cannot_mint_guest_sessions",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_worker_sends_encrypted_mail_and_clears_delivery_payload",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_wrong_codes_commit_attempts_and_lock_after_five",
-      "status": "skipped",
-      "reason": "PostgreSQL DSN not configured"
+      "status": "passed"
     }
   ]
 }

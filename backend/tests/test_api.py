@@ -285,6 +285,45 @@ class APITests(unittest.TestCase):
         status, _, _ = visitor.call('POST', '/api/v1/participations', {**body, 'nickname': '추가', 'service_consent': {'policy_version': 'v1', 'granted': True}})
         self.assertEqual(status, 409)
 
+    def test_guest_entry_cookie_finds_same_participant_after_session_cookie_loss(self):
+        # 7.1.1 / API-19: the signed entry-confirmation cookie re-identifies the guest; it is not authentication.
+        s, _ = self.lecture()
+        visitor = Client(HTTPApplication(self.service, 'backend'))
+        body = {'join_code': s['join_code'], 'nickname': '청중', 'service_consent': True}
+        status, payload, _ = visitor.call('POST', '/api/v1/participations', body)
+        self.assertEqual(status, 201, payload)
+        self.assertIn('easyq_join_retry', visitor.cookies)
+        pid = payload['data']['participant_id']
+        visitor.cookies.pop('easyq_session')
+        status, payload, _ = visitor.call('POST', '/api/v1/participations', body)
+        self.assertEqual((status, payload['data']['participant_id']), (200, pid))
+        self.assertEqual(self.row('SELECT count(*) n FROM participants')['n'], 1)
+        # A tampered or foreign-lecture cookie never reuses the participant.
+        visitor.cookies['easyq_join_retry'] = visitor.cookies['easyq_join_retry'][:-1] + '0'
+        visitor.cookies.pop('easyq_session')
+        status, payload, _ = visitor.call('POST', '/api/v1/participations', body)
+        self.assertEqual(status, 201, payload)
+        self.assertNotEqual(payload['data']['participant_id'], pid)
+
+    def test_capacity_ignores_guests_without_live_session(self):
+        s, _ = self.lecture()
+        with self.db.transaction() as tx:
+            for _ in range(50):
+                tx.execute("INSERT INTO participants(participant_id,session_id,kind,nickname,archived,joined_at) VALUES(%s,%s,'GUEST','G',false,%s)",
+                           (uid(), s['session_id'], self.moment - timedelta(hours=1)))
+        visitor = Client(HTTPApplication(self.service, 'backend'))
+        status, payload, _ = visitor.call('POST', '/api/v1/participations', {'join_code': s['join_code'], 'nickname': '새 청중', 'service_consent': True})
+        self.assertEqual(status, 201, payload)
+
+    def test_host_service_withdrawal_keeps_draft_and_blocks_start(self):
+        # 7.3.3 API-20: DRAFT stays; starting needs SERVICE consent again.
+        s, etag = self.lecture()
+        path = '/api/v1/sessions/' + s['session_id']
+        self.moment += timedelta(seconds=1)
+        self.assertEqual(self.api.call('POST', path + '/consents', {'purpose': 'SERVICE', 'policy_version': 'service-v1', 'granted': False})[0], 201)
+        self.assertEqual(self.row('SELECT status FROM lecture_sessions')['status'], 'DRAFT')
+        self.assertEqual(self.api.call('PATCH', path, {'status': 'LIVE'}, headers={'if-match': etag})[0], 403)
+
     def test_stt_consent_is_host_only_and_connecting_is_not_running(self):
         s, etag = self.lecture()
         path = '/api/v1/sessions/' + s['session_id']
@@ -409,6 +448,9 @@ class APITests(unittest.TestCase):
         job = self.row("SELECT * FROM jobs WHERE job_type='INGEST'")
         self.assertEqual(job['status'], 'HELD', job)
         self.assertEqual(job['error_code'], 'BUDGET_EXCEEDED')
+        # 6.3.5: a held document stays PENDING with the budget reason, not FAILED.
+        document = self.row('SELECT status,error_code FROM documents')
+        self.assertEqual((document['status'], document['error_code']), ('PENDING', 'BUDGET_EXCEEDED'))
         self.assertEqual(self.row('SELECT count(*) n FROM api_usage')['n'], 0)
         with self.db.transaction() as tx:
             tx.execute("UPDATE app_settings SET hard_cap_enabled=false WHERE setting_key='MONTHLY_API_BUDGET'")
@@ -556,9 +598,10 @@ class APITests(unittest.TestCase):
             self.assertEqual(self.auth.call('POST', '/api/v1/auth/sessions', {'email': 'member@example.com', 'password': 'easyq2026'})[0], 201)
         self.assertEqual(self.row("SELECT count(*) n FROM auth_rate_limits WHERE request_count>0")['n'], 3)  # mail IP/email + confirm IP
 
-    def test_invalid_join_code_locks_ip_after_twenty_failures(self):
+    def test_invalid_join_code_locks_ip_after_hundred_failures(self):
+        # 7.1.2: 100 per IP per 15 minutes, because a classroom shares one public IP.
         visitor = Client(HTTPApplication(self.service, 'backend'))
-        for _ in range(20):
+        for _ in range(100):
             self.assertEqual(visitor.call('GET', '/api/v1/join-codes/AAAAA')[0], 404)
         self.assertEqual(visitor.call('GET', '/api/v1/join-codes/AAAAA')[0], 429)
         self.moment += timedelta(minutes=16)

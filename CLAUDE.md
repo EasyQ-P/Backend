@@ -12,7 +12,8 @@ EasyQ: 강연 중 청중 질문에 교안 · 발화 근거로 AI가 답하고, �
 
 - 원본: `설계서/(CodingAnt팀)설계서_v1.0(엄윤종,심주혜,신재우,조현준,최의찬).hwp`
 - 백엔드 v1.2 반영본: `docs/CodingAnt팀_설계서_v1.0_백엔드v1.2반영.hwpx` (읽을 때는 압축을 풀어 `Contents/section0.xml`의 `<hp:t>` 텍스트를 뽑는다)
-- DB 스키마: `DB 스키마파일/easyq_schema_v1.2.sql`
+- DB 스키마: `DB 스키마파일/easyq_schema_v1.2.sql` (내용은 원본 그대로, PostgreSQL 적용을 위해 UNIQUE · 인덱스 블록만 FK 앞으로 옮김)
+- **설계 v1.3 작업본은 2026-11-25 팀 회의에서 반려됐다.** v1.2 반영본을 따른다. 반려본은 로컬 `docs/archive/v1.3-반려/`에만 있고 레포에는 없다.
 - **AI팀 협업 규칙: `docs/EasyQ_AI팀_협업규칙.md`** — 교안 추출 · 정리 · 청킹(400토큰), 발화 30초, retrieval 패키지 · 학습서버 연동 경계. 교안 처리 · 발화 색인 · 검색 · 판정 · 학습서버 작업 전에 먼저 읽는다.
 - 참고: `docs/EasyQ_팀공유_보류사항.md`, `docs/EasyQ_통합검토_유스케이스_API.md`, `docs/EasyQ_Mermaid_원본.md`
 
@@ -70,7 +71,7 @@ backend/                  backend(API, 8000)와 worker가 같은 코드 · 이�
 ## 핵심 규칙
 
 ### 실행 단위와 경계
-- auth만 비밀번호 해시 · 인증 코드 · 재설정 토큰 검증값을 읽고 쓴다. backend는 세션을 `auth_session_view`(세션 해시 · CSRF 해시 · 생성 · 만료 · 폐기, 회원 상태 · 역할 · 이메일 인증, 게스트 참가 상태)로만 읽는다. DB 계정은 auth · backend · worker 별로 최소 권한(`DB 스키마파일/easyq_grants_v1.3.sql`, 회원 표는 비밀번호 해시를 뺀 열 단위 권한).
+- auth만 비밀번호 해시 · 인증 코드 · 재설정 토큰 검증값을 읽고 쓴다. backend는 `auth_session_view`(세션 해시 · 만료 · 폐기, 회원 상태 · 역할 · 이메일 인증, 게스트 참가 상태)만 읽는다. DB 계정은 auth · backend · worker 별로 최소 권한.
 - backend → auth는 내부 API(`/internal/v1`, 게스트 세션 발급 INT-01 · 세션 폐기 INT-02 · HOST 세션 연장 INT-03)로만. `/internal/v1/*`은 Caddy가 프록시하지 않는다.
 - 공개 경로 분기(7.1.4): `POST /api/v1/users`, `/api/v1/auth/*`, 정확히 `GET·PATCH /api/v1/me` → auth. `/api/v1/me/questions`, `POST /api/v1/me/consents`와 나머지 `/api/v1`, `/api/v1/ws` → backend.
 - auth가 죽어도 이미 발급된 세션으로 강연 · 질문은 계속 동작해야 한다. RDS 확인 실패 시 인증 불허.
@@ -82,7 +83,7 @@ backend/                  backend(API, 8000)와 worker가 같은 코드 · 이�
 - 변경 요청: 인증 쿠키 + Origin 검사 + `X-CSRF-Token`. 가입 · 인증 메일 · 인증 확인 · 로그인 · 입장 · 재설정 · CSRF 재발급은 Origin 검사만.
 - 비동기: `202 {resource_id, job_id, status}` + `Location: /api/v1/jobs/{job_id}`. 비동기 POST는 `Idempotency-Key` 필수(다른 본문이면 409 `IDEMPOTENCY_CONFLICT`).
 - 강연 · 질문 상태 변경은 `If-Match`(version). 서빙 전환은 `expected_active_deployment_id`.
-- 요청 한도는 가입 · 로그인 · 인증 메일 · 코드 확인 · 재설정 메일 · 입장 코드 · 현재 비밀번호 확인(API-10)에만, 카운터는 RDS(`auth_rate_limits`). 질문 API에는 걸지 않는다.
+- 요청 한도는 가입 · 로그인 · 인증 메일 · 코드 확인 · 재설정 메일 · 입장 코드에만, 카운터는 RDS(`auth_rate_limits`). 질문 API에는 걸지 않는다.
 - 응답에 내부 FK · 토큰 해시 · S3 키를 넣지 않는다. 개인 답변 · 필기 · 관리자 응답은 별도 스키마로 직렬화한다.
 - 인증 쿠키 `easyq_session`: Secure · HttpOnly · SameSite=Lax · Path=/, DB에는 토큰 해시만.
 

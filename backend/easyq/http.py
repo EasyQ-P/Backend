@@ -33,6 +33,9 @@ ROUTES = [
     ('backend', 'POST', '/sessions/{sid}/consents', 'API-20', '강연 동의'),
     ('backend', 'POST', '/sessions/{sid}/documents', 'API-21', '교안 접수'),
     ('backend', 'GET', '/sessions/{sid}/documents', 'API-22', '교안 처리 상태: 처리 검증 지원'),
+    ('backend', 'GET', '/sessions', 'API-14', '내 강연 · 보관함 강연 목록'),
+    ('backend', 'POST', '/sessions/{sid}/documents/{did}/retries', 'API-23', '교안 처리 재시도'),
+    ('backend', 'PUT', '/sessions/{sid}/terms', 'API-25', '전문용어 사전 저장'),
     ('backend', 'GET', '/jobs/{job_id}', 'API-41', '작업 상태: 비동기 작업 검증 지원'),
 ]
 
@@ -99,18 +102,18 @@ class HTTPApplication:
         except Exception:
             # Do not serialize DB/SMTP/provider exceptions: they may include secrets.
             status = 503
-            payload = dumps({'request_id': rid, 'error': {'code': 'DEPENDENCY_UNAVAILABLE', 'message': 'Dependency unavailable', 'details': {}, 'retryable': True}}).encode()
+            payload = dumps({'request_id': rid, 'error': {'code': 'SERVICE_UNAVAILABLE', 'message': 'Service unavailable', 'details': {}, 'retryable': True}}).encode()
         if status != 204:
             base_headers['Content-Type'] = 'application/json; charset=utf-8'
         base_headers['Content-Length'] = str(len(payload))
-        # A header value may be a list (several Set-Cookie lines in one response).
-        raw_headers = [(k.lower().encode(), item.encode('latin1')) for k, v in base_headers.items() for item in (v if isinstance(v, list) else [v])]
-        await send({'type': 'http.response.start', 'status': status, 'headers': raw_headers})
+        await send({'type': 'http.response.start', 'status': status, 'headers': [(k.lower().encode(), v.encode('latin1')) for k, v in base_headers.items()]})
         await send({'type': 'http.response.body', 'body': payload})
 
 
-def create_app(mode='backend', service=None):
-    from fastapi import FastAPI
+def create_app(mode='backend', service=None, stt_factory=None):
+    from contextlib import asynccontextmanager
+    import asyncio
+    from fastapi import FastAPI, WebSocket
     if service is None:
         from .config import Settings
         from .db import Database
@@ -118,7 +121,38 @@ def create_app(mode='backend', service=None):
         from .service import Service
         settings = Settings.from_env()
         service = Service(Database(settings.database_url), settings, storage_from(settings), AuthClient(settings))
-    app = FastAPI(title='EasyQ ' + mode, version='0.3.0')
+    hub = None
+    if mode == 'backend':
+        from .live import EventHub
+        hub = EventHub(service)
+        if stt_factory is None:
+            from .adapters import GeminiLiveSTT
+            stt_factory = GeminiLiveSTT(service.settings)
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        task = asyncio.create_task(hub.run()) if hub else None
+        yield
+        if task:
+            task.cancel()
+
+    app = FastAPI(title='EasyQ ' + mode, version='0.3.0', lifespan=lifespan)
+
+    if hub:
+        from .live import LiveConnection, StarletteSocket
+        from .contracts import uuid_value, APIError
+
+        @app.websocket('/api/v1/ws/sessions/{sid}')
+        async def live(websocket: WebSocket, sid: str):
+            # 7.3.10: same-site HttpOnly cookie, Origin, lecture permission are checked before accept.
+            try:
+                sid = uuid_value(sid)
+            except APIError:
+                await websocket.close(1008)
+                return
+            headers = {k.lower(): v for k, v in websocket.headers.items()}
+            await LiveConnection(service, hub, stt_factory, StarletteSocket(websocket), sid, headers,
+                                 dict(websocket.cookies)).run()
 
     def openapi():
         paths = {}
@@ -132,8 +166,8 @@ def create_app(mode='backend', service=None):
             if method != 'GET':
                 parameters.append({'name': 'Origin', 'in': 'header', 'required': True, 'schema': {'type': 'string'}})
             operation = {'operationId': aid, 'summary': summary, 'parameters': parameters,
-                'responses': {str(c): {'description': d} for c, d in [(200, 'OK'), (201, 'Created'), (202, 'Accepted'), (204, 'No Content'), (401, 'AUTH_REQUIRED'), (403, 'FORBIDDEN'), (409, 'State/version conflict'), (422, 'Validation error'), (429, 'Rate limited'), (503, 'Dependency unavailable')]}}
-            if method in ('POST', 'PATCH'):
+                'responses': {str(c): {'description': d} for c, d in [(200, 'OK'), (201, 'Created'), (202, 'Accepted'), (204, 'No Content'), (401, 'AUTH_REQUIRED'), (403, 'FORBIDDEN'), (409, 'State/version conflict'), (422, 'Validation error'), (429, 'Rate limited'), (503, 'SERVICE_UNAVAILABLE')]}}
+            if method in ('POST', 'PATCH', 'PUT') and not path.endswith('/retries'):
                 media = 'multipart/form-data' if path.endswith('/documents') else 'application/json'
                 operation['requestBody'] = {'content': {media: {'schema': {'type': 'object'}}}}
             paths.setdefault('/api/v1' + path, {})[method.lower()] = operation

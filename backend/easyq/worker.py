@@ -6,31 +6,106 @@ import time
 
 from .contracts import APIError, dt, dumps, obj, uid
 from .retrieval import chunks, check_vectors, extract_pages, keywords, overlap_ratio
+from .terms import extract_terms, merge_terms
 from .security import decrypt
 from .budget import month_bounds, reserve, settle
 
 
 class Worker:
-    TYPES = ('INGEST', 'EMAIL_VERIFICATION', 'PASSWORD_RESET', 'AUTO_END', 'FINALIZE', 'AUTH_REVOKE', 'CLEANUP')
+    TYPES = ('TRANSCRIPT_INDEX', 'INGEST', 'EMAIL_VERIFICATION', 'PASSWORD_RESET', 'AUTO_END', 'FINALIZE', 'AUTH_REVOKE', 'CLEANUP')
+    MAX_ATTEMPTS = 3
+    # Failures caused by the original file or a finished lecture are not retried.
+    PERMANENT = ('DOCUMENT_INVALID', 'DOCUMENT_NO_TEXT', 'SESSION_STATE_CONFLICT', 'RESOURCE_NOT_FOUND')
 
     def __init__(self, service, embedder, mailer, tokenizer=None):
         self.service, self.db, self.settings = service, service.db, service.settings
         self.embedder, self.mailer, self.tokenizer = embedder, mailer, tokenizer
 
+    @staticmethod
+    def error_code(job_type, internal):
+        """Persisted error_code must be an 8.4.2 code (jobs.error_code is shown by API-22 · API-41)."""
+        if internal in ('BUDGET_EXCEEDED', 'SESSION_STATE_CONFLICT', 'RESOURCE_NOT_FOUND', 'MERGE_RECONCILIATION_REQUIRED'):
+            return internal
+        if job_type == 'INGEST':
+            return 'DOCUMENT_PARSE_FAILED' if internal in ('DOCUMENT_INVALID', 'DOCUMENT_NO_TEXT') else 'INDEX_BUILD_FAILED'
+        if job_type == 'TRANSCRIPT_INDEX':
+            return 'INDEX_BUILD_FAILED'
+        if job_type in ('EMAIL_VERIFICATION', 'PASSWORD_RESET'):
+            return 'EMAIL_DELIVERY_FAILED'
+        if job_type == 'AUTH_REVOKE':
+            return 'AUTH_SERVICE_UNAVAILABLE'
+        return 'SERVICE_UNAVAILABLE'
+
+    def record_failure(self, tx, job, code, final):
+        if job['job_type'] == 'INGEST':
+            status = 'FAILED' if final else 'PENDING'
+            # A document being deleted (DELETING) must never come back as FAILED/PENDING.
+            tx.execute("UPDATE documents SET status=%s,error_code=%s WHERE document_id=%s AND status<>'DELETING'", (status, code, job['target_id']))
+            self.service.event(tx, 'document.updated', {'document_id': str(job['target_id']), 'status': status, 'error_code': code}, str(job['session_id']))
+        elif job['job_type'] == 'TRANSCRIPT_INDEX' and final and code != 'BUDGET_EXCEEDED':
+            # 6.2.5: a failed utterance stays PENDING while retried; only the final failure is marked.
+            tx.execute("UPDATE knowledge_chunks SET index_status='FAILED' WHERE session_id=%s AND chunk_id=%s AND index_status='PENDING'",
+                       (job['session_id'], job['target_id']))
+
     def claim(self):
         moment = self.service.clock()
+        marks = ','.join('%s' for _ in self.TYPES)
+        while True:
+            with self.db.transaction() as tx:
+                # Utterance indexing goes before document processing (6.1.2: 발화 색인이 교안 처리보다 우선).
+                row = tx.one(f"""SELECT * FROM jobs WHERE job_type IN ({marks}) AND
+                    ((status='QUEUED' AND available_at<=%s) OR (status='RUNNING' AND lease_until<%s))
+                    ORDER BY CASE WHEN job_type='TRANSCRIPT_INDEX' THEN 0 ELSE 1 END,available_at,created_at,job_id
+                    LIMIT 1 FOR UPDATE SKIP LOCKED""", (*self.TYPES, moment, moment))
+                if not row:
+                    return None
+                if row['status'] == 'RUNNING' and row['attempts'] >= self.MAX_ATTEMPTS:
+                    # The worker died MAX_ATTEMPTS times on this job (e.g. out of memory): stop reclaiming it forever.
+                    code = self.error_code(row['job_type'], 'WORKER_EXCEPTION')
+                    tx.execute("""UPDATE jobs SET status='FAILED',error_code=%s,lease_until=NULL,finished_at=%s WHERE job_id=%s""",
+                               (code, moment, row['job_id']))
+                    self.record_failure(tx, row, code, True)
+                    continue
+                lease = uid()
+                tx.execute("""UPDATE jobs SET status='RUNNING',lease_token=%s,lease_until=%s,attempts=attempts+1
+                    WHERE job_id=%s""", (lease, moment + timedelta(minutes=5), row['job_id']))
+                row.update(lease_token=lease, attempts=row['attempts'] + 1)
+                return row
+
+    def transcript_index(self, job):
+        """TRANSCRIPT_INDEX (6.2.5): embed and keyword-index one ~30 s utterance chunk, then READY."""
         with self.db.transaction() as tx:
-            marks = ','.join('%s' for _ in self.TYPES)
-            row = tx.one(f"""SELECT * FROM jobs WHERE job_type IN ({marks}) AND
-                ((status='QUEUED' AND available_at<=%s) OR (status='RUNNING' AND lease_until<%s))
-                ORDER BY available_at,created_at,job_id LIMIT 1 FOR UPDATE SKIP LOCKED""", (*self.TYPES, moment, moment))
-            if not row:
-                return None
-            lease = uid()
-            tx.execute("""UPDATE jobs SET status='RUNNING',lease_token=%s,lease_until=%s,attempts=attempts+1
-                WHERE job_id=%s""", (lease, moment + timedelta(minutes=5), row['job_id']))
-            row.update(lease_token=lease, attempts=row['attempts'] + 1)
-            return row
+            self.active(tx, job)
+            chunk = tx.one("SELECT * FROM knowledge_chunks WHERE session_id=%s AND chunk_id=%s AND source_type='TRANSCRIPT'",
+                           (job['session_id'], job['target_id']))
+            if not chunk or chunk['index_status'] == 'READY':
+                self.finish(tx, job, {'skipped': True})
+                return
+        if self.tokenizer is None:
+            from kiwipiepy import Kiwi
+            self.tokenizer = Kiwi()
+        usage_id = reserve(self.service, job)
+        began = time.monotonic()
+        try:
+            vector = check_vectors(self.embedder.embed([chunk['content']]), 1)[0]
+        except Exception:
+            settle(self.service, usage_id, False, int((time.monotonic() - began) * 1000))
+            raise
+        settle(self.service, usage_id, True, int((time.monotonic() - began) * 1000))
+        with self.db.transaction() as tx:
+            self.active(tx, job)
+            lecture = tx.one('SELECT status,stt_status FROM lecture_sessions WHERE session_id=%s', (job['session_id'],))
+            if not lecture or lecture['status'] not in ('DRAFT', 'LIVE', 'ENDED'):
+                raise APIError(409, 'SESSION_STATE_CONFLICT')
+            moment = self.service.clock()
+            tx.execute("""UPDATE knowledge_chunks SET embedding=%s::vector,search_vector=to_tsvector('simple',%s),
+                retrieval_config_version=%s,index_status='READY',indexed_at=%s WHERE session_id=%s AND chunk_id=%s""",
+                (dumps(vector), keywords(chunk['content'], self.tokenizer), self.settings.retrieval_version, moment,
+                 job['session_id'], job['target_id']))
+            lag = max(0, int((moment - dt(chunk['captured_at'])).total_seconds() * 1000))
+            self.service.event(tx, 'stt.status', {'status': lecture['stt_status'], 'indexed_until_ms': chunk['end_ms'],
+                'ingest_lag_ms': lag}, str(job['session_id']))
+            self.finish(tx, job, {'indexed_until_ms': chunk['end_ms']})
 
     def active(self, tx, job):
         current = tx.one('SELECT * FROM jobs WHERE job_id=%s FOR UPDATE', (job['job_id'],))
@@ -84,7 +159,9 @@ class Worker:
                 raise
             settle(self.service, usage_id, True, int((time.monotonic() - began) * 1000))
             vectors.extend(vector_batch)
-        # Terms are a later milestone; v0.3 stores only the shared lexical/vector index.
+        # 6.2.3 / API-25: term extraction is the last stage (UPLOADED → EXTRACTING → INDEXING → TERMS → READY).
+        self.stage(job, 'TERMS')
+        document_terms = extract_terms(pages, self.tokenizer)
         with self.db.transaction() as tx:
             self.active(tx, job)
             lecture = tx.one('SELECT * FROM lecture_sessions WHERE session_id=%s FOR UPDATE', (job['session_id'],))
@@ -102,16 +179,24 @@ class Worker:
                     (uid(), job['session_id'], job['target_id'], f'{job["target_id"]}:{piece["page_no"]}:{piece["ordinal"]}',
                      piece['page_no'], piece['content'], dumps(vector), keywords(piece['content'], self.tokenizer),
                      self.settings.retrieval_version, self.service.clock(), self.service.clock()))
-            tx.execute("UPDATE documents SET status='READY',page_count=%s,chunk_count=%s,error_code=NULL WHERE document_id=%s",
-                (len(pages), len(pieces), job['target_id']))
+            tx.execute("UPDATE documents SET status='READY',stage=NULL,page_count=%s,chunk_count=%s,error_code=NULL,terms=%s WHERE document_id=%s",
+                (len(pages), len(pieces), dumps(document_terms), job['target_id']))
+            # Add the document's terms to the lecture dictionary once, up to 100, never re-adding host-removed terms.
+            # The host edits only in DRAFT; documents added while LIVE still fill free slots for the next STT connection.
+            merged, added = merge_terms(obj(lecture['terms']) or [], obj(lecture['removed_terms']) or [], document_terms)
+            if added:
+                tx.execute('UPDATE lecture_sessions SET terms=%s,version=version+1 WHERE session_id=%s', (dumps(merged), job['session_id']))
+                self.service.event(tx, 'session.updated', {'session_id': str(job['session_id']), 'status': lecture['status'],
+                    'version': lecture['version'] + 1}, str(job['session_id']))
             # Until the AI team's evaluation reference sync exists, never claim the evaluation check succeeded.
             references = tx.all('SELECT normalized_text,eval_slide_version FROM eval_reference_chunks WHERE eval_slide_version=%s', (self.settings.reference_version,)) if self.settings.reference_version and self.settings.reference_retrieval_version == self.settings.retrieval_version else []
             if references:
                 all_chunks = tx.all("SELECT content FROM knowledge_chunks WHERE session_id=%s AND source_type='DOCUMENT' AND index_status='READY'", (job['session_id'],))
                 matched = sum(any(overlap_ratio(p['content'], r['normalized_text']) >= .8 for r in references) for p in all_chunks)
                 detected = bool(all_chunks) and matched / len(all_chunks) >= .3
-                detection = {'check_status': 'CHECKED', 'matched_chunks': matched, 'total_chunks': len(all_chunks),
-                    'match_ratio': matched / len(all_chunks) if all_chunks else 0, 'reference_version': references[0]['eval_slide_version'],
+                # 8.2.6 eval_detection keys: check_status PENDING / DONE, eval_slide_version.
+                detection = {'check_status': 'DONE', 'matched_chunks': matched, 'total_chunks': len(all_chunks),
+                    'match_ratio': matched / len(all_chunks) if all_chunks else 0, 'eval_slide_version': references[0]['eval_slide_version'],
                     'retrieval_config_version': self.settings.retrieval_version, 'checked_at': self.service.clock(), 'auto_detected': detected}
                 # Preserve a manual evaluation mark; automated checks cannot clear it.
                 before = obj(lecture['eval_detection'])
@@ -123,7 +208,7 @@ class Worker:
                 detection['check_status'] = 'PENDING'
                 tx.execute('UPDATE lecture_sessions SET eval_detection=%s WHERE session_id=%s', (dumps(detection), job['session_id']))
             self.service.event(tx, 'document.updated', {'document_id': str(job['target_id']), 'status': 'READY', 'page_count': len(pages), 'chunk_count': len(pieces)}, str(job['session_id']))
-            self.finish(tx, job, {'page_count': len(pages), 'chunk_count': len(pieces)})
+            self.finish(tx, job, {'page_count': len(pages), 'chunk_count': len(pieces), 'term_count': len(document_terms), 'terms_added': len(added)})
 
     def mail(self, job):
         reset = job['job_type'] == 'PASSWORD_RESET'
@@ -188,6 +273,8 @@ class Worker:
             kind = job['job_type']
             if kind == 'INGEST':
                 self.ingest(job)
+            elif kind == 'TRANSCRIPT_INDEX':
+                self.transcript_index(job)
             elif kind in ('EMAIL_VERIFICATION', 'PASSWORD_RESET'):
                 self.mail(job)
             elif kind == 'AUTH_REVOKE':
@@ -210,25 +297,22 @@ class Worker:
                         self.cleanup(tx, job)
                     self.finish(tx, job)
         except Exception as exc:
-            code = exc.code if isinstance(exc, APIError) else 'WORKER_DEPENDENCY_UNAVAILABLE'
-            if code != 'LEASE_LOST':
+            internal = exc.code if isinstance(exc, APIError) else 'WORKER_EXCEPTION'
+            if internal != 'LEASE_LOST':
                 with self.db.transaction() as tx:
                     try:
                         self.active(tx, job)
                     except APIError:
                         return True
-                    permanent = code in ('DOCUMENT_INVALID', 'DOCUMENT_NO_TEXT', 'SESSION_STATE_CONFLICT', 'RESOURCE_NOT_FOUND')
-                    held = code in ('BUDGET_EXCEEDED', 'MERGE_RECONCILIATION_REQUIRED')
-                    failed = permanent or job['attempts'] >= 3
+                    permanent = internal in self.PERMANENT
+                    held = internal in ('BUDGET_EXCEEDED', 'MERGE_RECONCILIATION_REQUIRED')
+                    failed = permanent or job['attempts'] >= self.MAX_ATTEMPTS
+                    code = self.error_code(job['job_type'], internal)
                     tx.execute("""UPDATE jobs SET status=%s,error_code=%s,available_at=%s,lease_until=NULL,finished_at=%s
                         WHERE job_id=%s AND lease_token=%s""", ('HELD' if held else ('FAILED' if failed else 'QUEUED'), code,
                         month_bounds(self.service.clock())[1] if held else self.service.clock() + timedelta(seconds=30 * 2 ** (job['attempts'] - 1)), self.service.clock() if failed or held else None,
                         job['job_id'], job['lease_token']))
-                    if job['job_type'] == 'INGEST':
-                        # 6.3.5: a budget-held document stays PENDING with error_code BUDGET_EXCEEDED until the cap is lifted.
-                        doc_status = 'FAILED' if failed and not held else 'PENDING'
-                        tx.execute('UPDATE documents SET status=%s,error_code=%s WHERE document_id=%s', (doc_status, code, job['target_id']))
-                        self.service.event(tx, 'document.updated', {'document_id': str(job['target_id']), 'status': doc_status, 'error_code': code}, str(job['session_id']))
+                    self.record_failure(tx, job, code, failed or held)
         finally:
             stop.set()
             heartbeat.join(timeout=1)

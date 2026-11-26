@@ -487,6 +487,55 @@ CREATE TABLE app_settings (
     PRIMARY KEY (setting_key)
 );
 
+-- Unique keys and query indexes from section 8.2.35.
+-- Applied before the foreign keys: PostgreSQL requires the referenced UNIQUE index to exist first (statement order only).
+CREATE UNIQUE INDEX uq_users_email ON users (email);
+CREATE UNIQUE INDEX uq_auth_sessions_token_hash ON auth_sessions (token_hash);
+CREATE UNIQUE INDEX uq_email_verifications_user_id ON email_verifications (user_id) WHERE consumed_at IS NULL AND revoked_at IS NULL;
+CREATE UNIQUE INDEX uq_password_resets_user_id ON password_resets (user_id) WHERE consumed_at IS NULL AND revoked_at IS NULL;
+CREATE UNIQUE INDEX uq_lecture_sessions_join_code ON lecture_sessions (join_code);
+CREATE UNIQUE INDEX uq_lecture_sessions_previous_join_code ON lecture_sessions (previous_join_code) WHERE previous_join_code IS NOT NULL;
+CREATE UNIQUE INDEX uq_participants_session_id_participant_id ON participants (session_id, participant_id);
+CREATE UNIQUE INDEX uq_participants_session_id_user_id ON participants (session_id, user_id) WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_documents_session_id_document_id ON documents (session_id, document_id);
+CREATE UNIQUE INDEX uq_documents_object_key ON documents (object_key);
+CREATE UNIQUE INDEX uq_knowledge_chunks_session_id_chunk_id ON knowledge_chunks (session_id, chunk_id);
+CREATE UNIQUE INDEX uq_knowledge_chunks_session_id_source_key ON knowledge_chunks (session_id, source_key);
+CREATE UNIQUE INDEX uq_questions_session_id_question_id ON questions (session_id, question_id);
+CREATE UNIQUE INDEX uq_questions_participant_id_idempotency_key ON questions (participant_id, idempotency_key);
+CREATE UNIQUE INDEX uq_summary_notes_session_id ON summary_notes (session_id);
+CREATE UNIQUE INDEX uq_answers_question_id ON answers (question_id);
+CREATE UNIQUE INDEX uq_answers_session_id_answer_id ON answers (session_id, answer_id);
+CREATE UNIQUE INDEX uq_feedback_candidates_merge_request_id ON feedback_candidates (merge_request_id) WHERE merge_request_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_candidate_provenance_event_key ON candidate_provenance (event_key);
+CREATE UNIQUE INDEX uq_datasets_version_name ON datasets (version_name);
+CREATE UNIQUE INDEX uq_model_versions_version_name ON model_versions (version_name);
+CREATE UNIQUE INDEX uq_deployments_status ON deployments (status) WHERE status = 'ACTIVE';
+CREATE UNIQUE INDEX uq_jobs_idempotency_key ON jobs (idempotency_key);
+CREATE INDEX ix_lecture_sessions_host_user_id_status_scheduled_at ON lecture_sessions (host_user_id, status, scheduled_at);
+CREATE INDEX ix_lecture_sessions_raw_data_expires_at ON lecture_sessions (raw_data_expires_at);
+CREATE INDEX ix_lecture_sessions_status_started_at ON lecture_sessions (status, started_at);
+CREATE INDEX ix_participants_session_id_status ON participants (session_id, status);
+CREATE INDEX ix_participants_user_id_archived ON participants (user_id, archived);
+CREATE INDEX ix_knowledge_chunks_session_id_source_type_index_status ON knowledge_chunks (session_id, source_type, index_status);
+CREATE INDEX ix_questions_session_id_status_vote_count_created_at ON questions (session_id, status, vote_count DESC, created_at);
+CREATE INDEX ix_questions_participant_id_created_at ON questions (participant_id, created_at);
+CREATE INDEX ix_question_notes_user_id ON question_notes (user_id);
+CREATE INDEX ix_jobs_status_available_at ON jobs (status, available_at);
+CREATE INDEX ix_api_usage_created_at_operation ON api_usage (created_at, operation);
+CREATE INDEX ix_api_usage_session_id_created_at ON api_usage (session_id, created_at);
+CREATE INDEX ix_notices_deleted_at_created_at ON notices (deleted_at, created_at DESC);
+CREATE INDEX ix_inquiries_user_id_created_at ON inquiries (user_id, created_at DESC);
+CREATE INDEX ix_inquiries_status_created_at ON inquiries (status, created_at);
+CREATE INDEX ix_knowledge_chunks_search_vector ON knowledge_chunks USING gin (search_vector);
+CREATE INDEX ix_knowledge_chunks_embedding ON knowledge_chunks USING hnsw (embedding vector_cosine_ops) WHERE embedding IS NOT NULL;
+CREATE INDEX ix_eval_reference_chunks_ngram_hashes ON eval_reference_chunks USING gin (ngram_hashes);
+CREATE INDEX ix_ws_events_session_event ON ws_events (session_id, event_id);
+CREATE INDEX ix_ws_events_expires ON ws_events (expires_at);
+CREATE INDEX ix_auth_rate_limits_expires ON auth_rate_limits (expires_at);
+CREATE INDEX ix_candidate_provenance_question ON candidate_provenance (question_id);
+CREATE INDEX ix_label_reviews_evidence ON label_reviews (evidence_id);
+
 -- Referential integrity. Composite references keep lecture data in its own session.
 ALTER TABLE auth_sessions ADD FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE;
 ALTER TABLE auth_sessions ADD FOREIGN KEY (participant_id) REFERENCES participants (participant_id) ON DELETE CASCADE;
@@ -611,54 +660,6 @@ ALTER TABLE ws_events ADD CHECK (question_id IS NULL OR session_id IS NOT NULL);
 ALTER TABLE api_usage ADD CHECK ((input_tokens IS NULL OR input_tokens >= 0) AND (output_tokens IS NULL OR output_tokens >= 0) AND (audio_ms IS NULL OR audio_ms >= 0) AND (estimated_cost IS NULL OR estimated_cost >= 0) AND latency_ms >= 0);
 ALTER TABLE notices ADD CHECK (version >= 1 AND char_length(content) <= 2000);
 ALTER TABLE inquiries ADD CHECK (char_length(content) <= 2000 AND (reply IS NULL OR char_length(reply) <= 2000));
-
--- Unique keys and query indexes from section 8.2.35.
-CREATE UNIQUE INDEX uq_users_email ON users (email);
-CREATE UNIQUE INDEX uq_auth_sessions_token_hash ON auth_sessions (token_hash);
-CREATE UNIQUE INDEX uq_email_verifications_user_id ON email_verifications (user_id) WHERE consumed_at IS NULL AND revoked_at IS NULL;
-CREATE UNIQUE INDEX uq_password_resets_user_id ON password_resets (user_id) WHERE consumed_at IS NULL AND revoked_at IS NULL;
-CREATE UNIQUE INDEX uq_lecture_sessions_join_code ON lecture_sessions (join_code);
-CREATE UNIQUE INDEX uq_lecture_sessions_previous_join_code ON lecture_sessions (previous_join_code) WHERE previous_join_code IS NOT NULL;
-CREATE UNIQUE INDEX uq_participants_session_id_participant_id ON participants (session_id, participant_id);
-CREATE UNIQUE INDEX uq_participants_session_id_user_id ON participants (session_id, user_id) WHERE user_id IS NOT NULL;
-CREATE UNIQUE INDEX uq_documents_session_id_document_id ON documents (session_id, document_id);
-CREATE UNIQUE INDEX uq_documents_object_key ON documents (object_key);
-CREATE UNIQUE INDEX uq_knowledge_chunks_session_id_chunk_id ON knowledge_chunks (session_id, chunk_id);
-CREATE UNIQUE INDEX uq_knowledge_chunks_session_id_source_key ON knowledge_chunks (session_id, source_key);
-CREATE UNIQUE INDEX uq_questions_session_id_question_id ON questions (session_id, question_id);
-CREATE UNIQUE INDEX uq_questions_participant_id_idempotency_key ON questions (participant_id, idempotency_key);
-CREATE UNIQUE INDEX uq_summary_notes_session_id ON summary_notes (session_id);
-CREATE UNIQUE INDEX uq_answers_question_id ON answers (question_id);
-CREATE UNIQUE INDEX uq_answers_session_id_answer_id ON answers (session_id, answer_id);
-CREATE UNIQUE INDEX uq_feedback_candidates_merge_request_id ON feedback_candidates (merge_request_id) WHERE merge_request_id IS NOT NULL;
-CREATE UNIQUE INDEX uq_candidate_provenance_event_key ON candidate_provenance (event_key);
-CREATE UNIQUE INDEX uq_datasets_version_name ON datasets (version_name);
-CREATE UNIQUE INDEX uq_model_versions_version_name ON model_versions (version_name);
-CREATE UNIQUE INDEX uq_deployments_status ON deployments (status) WHERE status = 'ACTIVE';
-CREATE UNIQUE INDEX uq_jobs_idempotency_key ON jobs (idempotency_key);
-CREATE INDEX ix_lecture_sessions_host_user_id_status_scheduled_at ON lecture_sessions (host_user_id, status, scheduled_at);
-CREATE INDEX ix_lecture_sessions_raw_data_expires_at ON lecture_sessions (raw_data_expires_at);
-CREATE INDEX ix_lecture_sessions_status_started_at ON lecture_sessions (status, started_at);
-CREATE INDEX ix_participants_session_id_status ON participants (session_id, status);
-CREATE INDEX ix_participants_user_id_archived ON participants (user_id, archived);
-CREATE INDEX ix_knowledge_chunks_session_id_source_type_index_status ON knowledge_chunks (session_id, source_type, index_status);
-CREATE INDEX ix_questions_session_id_status_vote_count_created_at ON questions (session_id, status, vote_count DESC, created_at);
-CREATE INDEX ix_questions_participant_id_created_at ON questions (participant_id, created_at);
-CREATE INDEX ix_question_notes_user_id ON question_notes (user_id);
-CREATE INDEX ix_jobs_status_available_at ON jobs (status, available_at);
-CREATE INDEX ix_api_usage_created_at_operation ON api_usage (created_at, operation);
-CREATE INDEX ix_api_usage_session_id_created_at ON api_usage (session_id, created_at);
-CREATE INDEX ix_notices_deleted_at_created_at ON notices (deleted_at, created_at DESC);
-CREATE INDEX ix_inquiries_user_id_created_at ON inquiries (user_id, created_at DESC);
-CREATE INDEX ix_inquiries_status_created_at ON inquiries (status, created_at);
-CREATE INDEX ix_knowledge_chunks_search_vector ON knowledge_chunks USING gin (search_vector);
-CREATE INDEX ix_knowledge_chunks_embedding ON knowledge_chunks USING hnsw (embedding vector_cosine_ops) WHERE embedding IS NOT NULL;
-CREATE INDEX ix_eval_reference_chunks_ngram_hashes ON eval_reference_chunks USING gin (ngram_hashes);
-CREATE INDEX ix_ws_events_session_event ON ws_events (session_id, event_id);
-CREATE INDEX ix_ws_events_expires ON ws_events (expires_at);
-CREATE INDEX ix_auth_rate_limits_expires ON auth_rate_limits (expires_at);
-CREATE INDEX ix_candidate_provenance_question ON candidate_provenance (question_id);
-CREATE INDEX ix_label_reviews_evidence ON label_reviews (evidence_id);
 
 -- Auth can read base tables; backend should only read this limited session projection.
 CREATE VIEW auth_session_view AS SELECT a.auth_session_id, a.token_hash, a.expires_at, a.revoked_at, a.user_id, a.participant_id, u.status AS user_status, u.role AS user_role, (u.email_verified_at IS NOT NULL) AS email_verified, p.status AS guest_status, p.session_id AS guest_session_id FROM auth_sessions a LEFT JOIN users u ON u.user_id = a.user_id LEFT JOIN participants p ON p.participant_id = a.participant_id;

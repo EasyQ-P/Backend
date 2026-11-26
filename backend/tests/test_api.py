@@ -18,9 +18,18 @@ from .support import Client, SQLiteDatabase, pdf, pptx
 
 
 class Tokenizer:
+    """Kiwi stand-in: whitespace tokens with positions; ASCII words are SL, a leading capital Korean-free
+    word is still SL, '#'-prefixed words act as proper nouns (NNP), everything else NNG."""
     def tokenize(self, value):
+        import re
         from types import SimpleNamespace
-        return [SimpleNamespace(form=x, tag='NNG') for x in value.split()]
+        result = []
+        for m in re.finditer(r'\S+', value):
+            form = m.group()
+            tag = 'NNP' if form.startswith('#') else ('SL' if form.isascii() and form[0].isalpha() else 'NNG')
+            form = form.lstrip('#')
+            result.append(SimpleNamespace(form=form, tag=tag, start=m.start() + (m.group() != form), len=len(form)))
+        return result
 
 
 class Embedder:
@@ -51,8 +60,102 @@ class GuestClient:
             {'x-service-key': self.auth.settings.internal_key}, body), 'auth').data
 
 
+class FakeSocket:
+    """In-memory WebSocket: plays a script of client messages, then disconnects."""
+    def __init__(self, script):
+        self.script, self.sent, self.closed, self.accepted = list(script), [], None, False
+
+    async def accept(self):
+        self.accepted = True
+
+    async def receive(self):
+        import asyncio
+        await asyncio.sleep(0)
+        while self.script:
+            item = self.script.pop(0)
+            if callable(item):
+                item()            # e.g. a REST call made while the socket is open
+            elif 'sleep' in item:
+                await asyncio.sleep(item['sleep'])
+            else:
+                return item
+        await asyncio.sleep(0.05)
+        return None
+
+    async def send_text(self, value):
+        import json
+        self.sent.append(json.loads(value))
+
+    async def close(self, code):
+        self.closed = code
+
+
+class FakeSTT:
+    """STT stand-in: one final utterance per second of audio (10 frames)."""
+    def __init__(self):
+        self.frames, self.terms = 0, None
+
+    def open(self, terms, on_final):
+        self.terms = terms
+        return FakeSTTStream(self, on_final)
+
+
+class FakeSTTStream:
+    def __init__(self, owner, on_final):
+        self.owner, self.on_final, self.start, self.end, self.count = owner, on_final, None, None, 0
+
+    async def send(self, pcm, start_ms):
+        self.owner.frames += 1
+        self.count += 1
+        if self.start is None:
+            self.start = start_ms
+        self.end = start_ms + len(pcm) // 32
+        if self.count % 10 == 0:
+            await self.on_final(self.start, self.end, f'발화 {self.count // 10}')
+            self.start = None
+
+    async def close(self):
+        if self.start is not None:
+            await self.on_final(self.start, self.end, '마지막')
+            self.start = None
+
+
+class FailingSTT(FakeSTT):
+    """STT whose provider is down (send fails) or whose close fails."""
+    def __init__(self, fail_send=False, fail_close=False):
+        super().__init__()
+        self.fail_send, self.fail_close = fail_send, fail_close
+
+    def open(self, terms, on_final):
+        stream = super().open(terms, on_final)
+        owner = self
+        send, close = stream.send, stream.close
+
+        async def failing_send(pcm, start_ms):
+            if owner.fail_send:
+                owner.frames += 1
+                raise RuntimeError('provider down')
+            await send(pcm, start_ms)
+
+        async def failing_close():
+            if owner.fail_close:
+                raise RuntimeError('provider close failed')
+            await close()
+        stream.send, stream.close = failing_send, failing_close
+        return stream
+
+
+def frame(stream_id, sequence):
+    """7.3.10 binary frame: stream UUID + sequence + start_ms, then 100 ms of 16 kHz mono PCM16 silence."""
+    from uuid import UUID
+    from easyq.live import FRAME_HEADER
+    return FRAME_HEADER.pack(UUID(stream_id).bytes, sequence, sequence * 100) + bytes(2) * 1600
+
+
 class APITests(unittest.TestCase):
     def setUp(self):
+        from easyq.live import LiveConnection
+        LiveConnection.streams.clear()
         self.moment = datetime(2026, 11, 11, 12, 0, tzinfo=timezone.utc)
         self.tmp = tempfile.TemporaryDirectory()
         self.settings = Settings('unused-test-url', 'https://easyq.test', 'test-hmac-' + 'x' * 40,
@@ -285,45 +388,6 @@ class APITests(unittest.TestCase):
         status, _, _ = visitor.call('POST', '/api/v1/participations', {**body, 'nickname': '추가', 'service_consent': {'policy_version': 'v1', 'granted': True}})
         self.assertEqual(status, 409)
 
-    def test_guest_entry_cookie_finds_same_participant_after_session_cookie_loss(self):
-        # 7.1.1 / API-19: the signed entry-confirmation cookie re-identifies the guest; it is not authentication.
-        s, _ = self.lecture()
-        visitor = Client(HTTPApplication(self.service, 'backend'))
-        body = {'join_code': s['join_code'], 'nickname': '청중', 'service_consent': True}
-        status, payload, _ = visitor.call('POST', '/api/v1/participations', body)
-        self.assertEqual(status, 201, payload)
-        self.assertIn('easyq_join_retry', visitor.cookies)
-        pid = payload['data']['participant_id']
-        visitor.cookies.pop('easyq_session')
-        status, payload, _ = visitor.call('POST', '/api/v1/participations', body)
-        self.assertEqual((status, payload['data']['participant_id']), (200, pid))
-        self.assertEqual(self.row('SELECT count(*) n FROM participants')['n'], 1)
-        # A tampered or foreign-lecture cookie never reuses the participant.
-        visitor.cookies['easyq_join_retry'] = visitor.cookies['easyq_join_retry'][:-1] + '0'
-        visitor.cookies.pop('easyq_session')
-        status, payload, _ = visitor.call('POST', '/api/v1/participations', body)
-        self.assertEqual(status, 201, payload)
-        self.assertNotEqual(payload['data']['participant_id'], pid)
-
-    def test_capacity_ignores_guests_without_live_session(self):
-        s, _ = self.lecture()
-        with self.db.transaction() as tx:
-            for _ in range(50):
-                tx.execute("INSERT INTO participants(participant_id,session_id,kind,nickname,archived,joined_at) VALUES(%s,%s,'GUEST','G',false,%s)",
-                           (uid(), s['session_id'], self.moment - timedelta(hours=1)))
-        visitor = Client(HTTPApplication(self.service, 'backend'))
-        status, payload, _ = visitor.call('POST', '/api/v1/participations', {'join_code': s['join_code'], 'nickname': '새 청중', 'service_consent': True})
-        self.assertEqual(status, 201, payload)
-
-    def test_host_service_withdrawal_keeps_draft_and_blocks_start(self):
-        # 7.3.3 API-20: DRAFT stays; starting needs SERVICE consent again.
-        s, etag = self.lecture()
-        path = '/api/v1/sessions/' + s['session_id']
-        self.moment += timedelta(seconds=1)
-        self.assertEqual(self.api.call('POST', path + '/consents', {'purpose': 'SERVICE', 'policy_version': 'service-v1', 'granted': False})[0], 201)
-        self.assertEqual(self.row('SELECT status FROM lecture_sessions')['status'], 'DRAFT')
-        self.assertEqual(self.api.call('PATCH', path, {'status': 'LIVE'}, headers={'if-match': etag})[0], 403)
-
     def test_stt_consent_is_host_only_and_connecting_is_not_running(self):
         s, etag = self.lecture()
         path = '/api/v1/sessions/' + s['session_id']
@@ -448,9 +512,6 @@ class APITests(unittest.TestCase):
         job = self.row("SELECT * FROM jobs WHERE job_type='INGEST'")
         self.assertEqual(job['status'], 'HELD', job)
         self.assertEqual(job['error_code'], 'BUDGET_EXCEEDED')
-        # 6.3.5: a held document stays PENDING with the budget reason, not FAILED.
-        document = self.row('SELECT status,error_code FROM documents')
-        self.assertEqual((document['status'], document['error_code']), ('PENDING', 'BUDGET_EXCEEDED'))
         self.assertEqual(self.row('SELECT count(*) n FROM api_usage')['n'], 0)
         with self.db.transaction() as tx:
             tx.execute("UPDATE app_settings SET hard_cap_enabled=false WHERE setting_key='MONTHLY_API_BUDGET'")
@@ -492,7 +553,8 @@ class APITests(unittest.TestCase):
             self.moment += timedelta(minutes=3)
         row = self.row('SELECT * FROM documents')
         self.assertEqual(row['status'], 'FAILED')
-        self.assertEqual(row['error_code'], 'WORKER_DEPENDENCY_UNAVAILABLE')
+        self.assertEqual(row['error_code'], 'INDEX_BUILD_FAILED')
+        self.assertTrue(self.api.call('GET', '/api/v1/sessions/' + s['session_id'] + '/documents')[1]['data']['items'][0]['retryable'])
 
     def test_liveness_does_not_require_database(self):
         original = self.service.db
@@ -598,10 +660,9 @@ class APITests(unittest.TestCase):
             self.assertEqual(self.auth.call('POST', '/api/v1/auth/sessions', {'email': 'member@example.com', 'password': 'easyq2026'})[0], 201)
         self.assertEqual(self.row("SELECT count(*) n FROM auth_rate_limits WHERE request_count>0")['n'], 3)  # mail IP/email + confirm IP
 
-    def test_invalid_join_code_locks_ip_after_hundred_failures(self):
-        # 7.1.2: 100 per IP per 15 minutes, because a classroom shares one public IP.
+    def test_invalid_join_code_locks_ip_after_twenty_failures(self):
         visitor = Client(HTTPApplication(self.service, 'backend'))
-        for _ in range(100):
+        for _ in range(20):
             self.assertEqual(visitor.call('GET', '/api/v1/join-codes/AAAAA')[0], 404)
         self.assertEqual(visitor.call('GET', '/api/v1/join-codes/AAAAA')[0], 429)
         self.moment += timedelta(minutes=16)
@@ -630,6 +691,392 @@ class APITests(unittest.TestCase):
             validate_document('test.pptx', PPTX, pptx(), replace(self.settings, expanded_limit=100))
         self.assertEqual(error.exception.status, 413)
 
+    # ---------------------------------------------------------------- v0.3 ----
+    def audience(self, s, address='audience@example.com'):
+        """Log a second member in on a fresh client and join lecture s."""
+        self.moment += timedelta(seconds=61)
+        auth, api = Client(HTTPApplication(self.service, 'auth')), Client(HTTPApplication(self.service, 'backend'))
+        saved = self.auth
+        self.auth = auth
+        self.register(address)
+        row = self.row('SELECT * FROM email_verifications v JOIN users u ON u.user_id=v.user_id WHERE u.email=%s', (address,))
+        code = decrypt(self.settings.encryption_key, row['delivery_ciphertext'])
+        auth.call('POST', '/api/v1/auth/email-verifications/confirm', {'email': address, 'code': code})
+        auth.call('POST', '/api/v1/auth/sessions', {'email': address, 'password': 'easyq2026'})
+        self.auth = saved
+        api.cookies, api.csrf = auth.cookies.copy(), auth.csrf
+        status, payload, _ = api.call('POST', '/api/v1/participations', {'join_code': s['join_code']})
+        self.assertEqual(status, 201, payload)
+        return api
+
+    def test_session_object_shows_code_and_terms_only_to_host(self):
+        s, _ = self.lecture()
+        path = '/api/v1/sessions/' + s['session_id']
+        host = self.api.call('GET', path)[1]['data']
+        self.assertEqual((host['join_code'], host['terms']), (s['join_code'], []))
+        member = self.audience(s)
+        seen = member.call('GET', path)[1]['data']
+        self.assertEqual(seen['my_role'], 'AUDIENCE')
+        self.assertNotIn('join_code', seen)
+        self.assertNotIn('terms', seen)
+
+    def test_terms_dictionary_is_normalized_draft_only_and_remembers_removed(self):
+        s, etag = self.lecture()
+        path = '/api/v1/sessions/' + s['session_id'] + '/terms'
+        status, payload, headers = self.api.call('PUT', path, {'terms': [' 해시  함수 ', 'Chaining', 'chaining', 'B-tree']}, headers={'if-match': etag})
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload['data']['terms'], ['해시 함수', 'Chaining', 'B-tree'])
+        self.assertEqual(self.api.call('PUT', path, {'terms': ['x']}, headers={'if-match': etag})[0], 409)
+        self.assertEqual(self.api.call('PUT', path, {'terms': ['a' * 41]}, headers={'if-match': headers['etag']})[0], 422)
+        self.assertEqual(self.api.call('PUT', path, {'terms': [f't{i}' for i in range(101)]}, headers={'if-match': headers['etag']})[0], 422)
+        status, payload, headers = self.api.call('PUT', path, {'terms': ['해시 함수']}, headers={'if-match': headers['etag']})
+        self.assertEqual(status, 200)
+        stored = self.row('SELECT terms,removed_terms FROM lecture_sessions WHERE session_id=%s', (s['session_id'],))
+        self.assertEqual(sorted(obj(stored['removed_terms'])), ['B-tree', 'Chaining'])
+        # Extraction never re-adds a removed term; the dictionary freezes once LIVE.
+        self.api.call('POST', '/api/v1/sessions/' + s['session_id'] + '/documents',
+                      upload=('t.pptx', PPTX, pptx(('chaining chaining 충돌 해결', 'chaining 과 #개방주소법'),)), headers={'idempotency-key': uid()})
+        self.drain()
+        terms = obj(self.row('SELECT terms FROM lecture_sessions WHERE session_id=%s', (s['session_id'],))['terms'])
+        self.assertIn('개방주소법', terms)
+        self.assertNotIn('chaining', [t.lower() for t in terms])
+        version = self.api.call('GET', '/api/v1/sessions/' + s['session_id'])[2]['etag']
+        _, _, h = self.api.call('PATCH', '/api/v1/sessions/' + s['session_id'], {'status': 'LIVE'}, headers={'if-match': version})
+        self.assertEqual(self.api.call('PUT', path, {'terms': []}, headers={'if-match': h['etag']})[0], 409)
+
+    def test_ingest_runs_terms_stage_and_fills_only_free_slots(self):
+        s, etag = self.lecture()
+        full = [f'용어{i}' for i in range(99)]
+        self.api.call('PUT', '/api/v1/sessions/' + s['session_id'] + '/terms', {'terms': full}, headers={'if-match': etag})
+        self.api.call('POST', '/api/v1/sessions/' + s['session_id'] + '/documents',
+                      upload=('t.pptx', PPTX, pptx(('#RAM #CPU 해시 함수 해시 함수', 'linked list linked list'))), headers={'idempotency-key': uid()})
+        self.drain()
+        document = self.row('SELECT * FROM documents')
+        self.assertEqual(document['status'], 'READY')
+        self.assertTrue(len(obj(document['terms'])) >= 3)
+        stages = [obj(r['payload']).get('stage') for r in self.db_rows("SELECT payload FROM ws_events WHERE event_type='document.updated' ORDER BY event_id")]
+        self.assertEqual([x for x in stages if x], ['UPLOADED', 'EXTRACTING', 'INDEXING', 'TERMS'])
+        terms = obj(self.row('SELECT terms FROM lecture_sessions WHERE session_id=%s', (s['session_id'],))['terms'])
+        self.assertEqual(len(terms), 100)   # one free slot filled, never more
+
+    def drain(self):
+        for _ in range(50):
+            if not self.worker.run_one():
+                return
+
+    def db_rows(self, sql, args=()):
+        with self.db.transaction() as tx:
+            return tx.all(sql, args)
+
+    def test_failed_document_retry_reindexes_from_original(self):
+        s, _ = self.lecture()
+        class Broken:
+            def embed(self, values):
+                raise RuntimeError('down')
+        good, self.worker.embedder = self.worker.embedder, Broken()
+        base = '/api/v1/sessions/' + s['session_id'] + '/documents'
+        _, accepted, _ = self.api.call('POST', base, upload=('r.pptx', PPTX, pptx()), headers={'idempotency-key': uid()})
+        did = accepted['data']['resource_id']
+        for _ in range(8):
+            self.worker.run_one()
+            self.moment += timedelta(minutes=3)
+        self.assertEqual(self.row('SELECT status,error_code FROM documents')['error_code'], 'INDEX_BUILD_FAILED')
+        self.worker.embedder = good
+        key = uid()
+        status, payload, headers = self.api.call('POST', f'{base}/{did}/retries', {}, headers={'idempotency-key': key})
+        self.assertEqual(status, 202, payload)
+        self.assertEqual(self.api.call('POST', f'{base}/{did}/retries', {}, headers={'idempotency-key': key})[1]['data']['job_id'], payload['data']['job_id'])
+        self.assertEqual(self.row('SELECT status FROM documents')['status'], 'PENDING')
+        self.drain()
+        self.assertEqual(self.row('SELECT status FROM documents')['status'], 'READY')
+        status, payload, _ = self.api.call('POST', f'{base}/{did}/retries', {}, headers={'idempotency-key': uid()})
+        self.assertEqual((status, payload['error']['code']), (409, 'DOCUMENT_NOT_RETRYABLE'))
+        self.assertEqual(self.api.call('POST', f'{base}/{uid()}/retries', {}, headers={'idempotency-key': uid()})[0], 404)
+
+    def test_document_broken_by_original_is_not_retryable(self):
+        s, _ = self.lecture()
+        base = '/api/v1/sessions/' + s['session_id'] + '/documents'
+        _, accepted, _ = self.api.call('POST', base, upload=('scan.pdf', PDF, pdf('')), headers={'idempotency-key': uid()})
+        self.drain()
+        item = self.api.call('GET', base)[1]['data']['items'][0]
+        self.assertEqual((item['status'], item['error_code'], item['retryable']), ('FAILED', 'DOCUMENT_PARSE_FAILED', False))
+        status, payload, _ = self.api.call('POST', f"{base}/{accepted['data']['resource_id']}/retries", {}, headers={'idempotency-key': uid()})
+        self.assertEqual((status, payload['error']['code']), (409, 'DOCUMENT_NOT_RETRYABLE'))
+        job = self.api.call('GET', '/api/v1/jobs/' + accepted['data']['job_id'])[1]['data']
+        self.assertEqual((job['status'], job['error_code']), ('FAILED', 'DOCUMENT_PARSE_FAILED'))
+
+    def test_my_lecture_lists_hosted_and_joined_with_cursor(self):
+        first, _ = self.lecture()
+        self.moment += timedelta(hours=1)
+        second = self.api.call('POST', '/api/v1/sessions', {'title': '운영체제', 'scheduled_at': self.moment.isoformat()})[1]['data']
+        status, page, _ = self.api.call('GET', '/api/v1/sessions?scope=hosted&limit=1')
+        self.assertEqual(status, 200, page)
+        self.assertEqual((page['data']['total_count'], [i['session_id'] for i in page['data']['items']]), (2, [second['session_id']]))
+        nxt = self.api.call('GET', '/api/v1/sessions?scope=hosted&limit=1&cursor=' + page['data']['next_cursor'])[1]['data']
+        self.assertEqual(([i['session_id'] for i in nxt['items']], nxt['next_cursor']), ([first['session_id']], None))
+        self.assertEqual(self.api.call('GET', '/api/v1/sessions?scope=hosted&status=LIVE')[1]['data']['items'], [])
+        self.assertEqual(self.api.call('GET', '/api/v1/sessions?scope=other')[0], 422)
+        member = self.audience(first)
+        joined = member.call('GET', '/api/v1/sessions?scope=joined')[1]['data']
+        self.assertEqual([(i['session_id'], i['my_role'], i['my_question_count']) for i in joined['items']], [(first['session_id'], 'AUDIENCE', 0)])
+        from urllib.parse import quote
+        self.assertEqual(member.call('GET', '/api/v1/sessions?scope=joined&q=' + quote('자료'))[1]['data']['total_count'], 1)
+        self.assertEqual(member.call('GET', '/api/v1/sessions?scope=joined&q=' + quote('없는%'))[1]['data']['total_count'], 0)
+        self.assertEqual(member.call('GET', '/api/v1/sessions?scope=hosted')[1]['data']['total_count'], 0)
+
+    def test_admin_is_created_only_by_server_command_and_logs_in_normally(self):
+        from easyq.admin import create_admin
+        user = create_admin(self.db, 'Admin@Example.com', '관리자', 'admin2026', clock=lambda: self.moment)
+        with self.assertRaises(APIError) as error:
+            create_admin(self.db, 'admin@example.com', '관리자', 'admin2026', clock=lambda: self.moment)
+        self.assertEqual(error.exception.code, 'EMAIL_ALREADY_EXISTS')
+        status, payload, _ = self.auth.call('POST', '/api/v1/auth/sessions', {'email': 'admin@example.com', 'password': 'admin2026'})
+        self.assertEqual((status, payload['data']['user']['role']), (201, 'ADMIN'))
+        with self.db.transaction() as tx:
+            p = tx.one('SELECT * FROM auth_session_view WHERE user_id=%s', (user,))
+            self.assertEqual(self.service.require_admin(p), user)
+        self.login()
+        with self.db.transaction() as tx:
+            p = tx.one("SELECT v.* FROM auth_session_view v JOIN users u ON u.user_id=v.user_id WHERE u.role='MEMBER'")
+            with self.assertRaises(APIError):
+                self.service.require_admin(p)
+
+    # ------------------------------------------------------- WebSocket ----
+    def live_lecture(self):
+        s, etag = self.lecture()
+        path = '/api/v1/sessions/' + s['session_id']
+        _, _, h = self.api.call('PATCH', path, {'status': 'LIVE'}, headers={'if-match': etag})
+        self.api.call('POST', path + '/consents', {'purpose': 'STT', 'policy_version': 'stt-v1', 'granted': True})
+        status, payload, h = self.api.call('PATCH', path, {'stt_status': 'RUNNING'}, headers={'if-match': self.api.call('GET', path)[2]['etag']})
+        self.assertEqual(payload['data']['stt_status'], 'CONNECTING')
+        return s
+
+    def run_socket(self, client, sid, script, stt=None, origin=None):
+        import asyncio
+        from easyq.live import EventHub, LiveConnection
+        socket = FakeSocket(script)
+        hub = EventHub(self.service)
+        headers = {'origin': origin or self.settings.origin}
+        connection = LiveConnection(self.service, hub, stt or FakeSTT(), socket, sid, headers, dict(client.cookies))
+        asyncio.run(connection.run())
+        return socket
+
+    def test_websocket_requires_origin_and_lecture_permission(self):
+        s = self.live_lecture()
+        self.assertEqual(self.run_socket(self.api, s['session_id'], [], origin='https://evil.test').closed, 1008)
+        outsider = Client(HTTPApplication(self.service, 'backend'))
+        self.assertEqual(self.run_socket(outsider, s['session_id'], []).closed, 1008)
+        socket = self.run_socket(self.api, s['session_id'], [{'text': dumps({'type': 'ping'})}])
+        self.assertEqual([m['type'] for m in socket.sent][:2], ['connection.ready', 'pong'])
+        self.assertEqual(socket.sent[0]['data']['role'], 'HOST')
+
+    def test_audience_cannot_stream_audio(self):
+        s = self.live_lecture()
+        member = self.audience(s)
+        socket = self.run_socket(member, s['session_id'], [{'text': dumps({'type': 'audio.start', 'data': {'stream_id': uid(), 'sample_rate': 16000, 'channels': 1}})}])
+        self.assertEqual([m['data'].get('code') for m in socket.sent if m['type'] == 'error'], ['FORBIDDEN'])
+
+    def test_host_audio_is_relayed_to_stt_and_indexed_as_30_second_chunks(self):
+        s = self.live_lecture()
+        sid = s['session_id']
+        self.api.call('GET', '/api/v1/sessions/' + sid)
+        stream = uid()
+        script = [{'text': dumps({'type': 'audio.start', 'data': {'stream_id': stream, 'sample_rate': 16000, 'channels': 1}})}]
+        script += [{'bytes': frame(stream, n)} for n in range(350)]                  # 35 s of 100 ms frames
+        script += [{'bytes': frame(stream, 5)}]                                       # duplicate frame is ignored
+        script += [{'text': dumps({'type': 'audio.stop', 'data': {'stream_id': stream}})}]
+        stt = FakeSTT()
+        socket = self.run_socket(self.api, sid, script, stt)
+        kinds = [m['type'] for m in socket.sent]
+        self.assertIn('audio.accepted', kinds)
+        self.assertEqual(stt.frames, 350)
+        self.assertEqual(stt.terms, [])
+        self.assertEqual(sum(k == 'transcript.final' for k in kinds), 35)
+        chunks = self.db_rows("SELECT * FROM knowledge_chunks WHERE source_type='TRANSCRIPT' ORDER BY start_ms")
+        self.assertEqual([(c['start_ms'], c['end_ms'], c['index_status']) for c in chunks], [(0, 30000, 'PENDING'), (30000, 35000, 'PENDING')])
+        self.assertTrue(chunks[0]['content'].startswith('발화 1 발화 2'))
+        self.assertEqual(self.row("SELECT count(*) n FROM jobs WHERE job_type='TRANSCRIPT_INDEX'")['n'], 2)
+        self.assertEqual(self.row('SELECT stt_status FROM lecture_sessions')['stt_status'], 'PAUSED')
+        # Audio never reaches storage: no event or row carries PCM, only text.
+        for row in self.db_rows('SELECT payload FROM ws_events'):
+            self.assertNotIn('\\u0000', str(row['payload']))
+        # Transcript indexing outranks document processing and makes the chunk searchable.
+        self.api.call('POST', '/api/v1/sessions/' + sid + '/documents', upload=('later.pptx', PPTX, pptx()), headers={'idempotency-key': uid()})
+        self.worker.run_one()
+        self.assertEqual(self.row("SELECT count(*) n FROM knowledge_chunks WHERE source_type='TRANSCRIPT' AND index_status='READY'")['n'], 1)
+        self.assertEqual(self.row('SELECT status FROM documents')['status'], 'PENDING')
+        self.worker.run_one()
+        self.assertEqual(self.row("SELECT count(*) n FROM knowledge_chunks WHERE source_type='TRANSCRIPT' AND index_status='READY'")['n'], 2)
+        status = [obj(r['payload']) for r in self.db_rows("SELECT payload FROM ws_events WHERE event_type='stt.status'")]
+        # Both chunks share created_at in the test clock, so their indexing order is not fixed.
+        self.assertEqual(sorted(x['indexed_until_ms'] for x in status), [30000, 35000])
+
+    def test_audio_needs_live_stt_consent_and_one_stream(self):
+        s, etag = self.lecture()
+        start = {'text': dumps({'type': 'audio.start', 'data': {'stream_id': uid(), 'sample_rate': 16000, 'channels': 1}})}
+        socket = self.run_socket(self.api, s['session_id'], [start])
+        self.assertEqual([m['data']['code'] for m in socket.sent if m['type'] == 'error'], ['SESSION_NOT_LIVE'])
+        path = '/api/v1/sessions/' + s['session_id']
+        self.api.call('PATCH', path, {'status': 'LIVE'}, headers={'if-match': etag})
+        socket = self.run_socket(self.api, s['session_id'], [start])
+        self.assertEqual([m['data']['code'] for m in socket.sent if m['type'] == 'error'], ['CONSENT_REQUIRED'])
+        bad = {'text': dumps({'type': 'audio.start', 'data': {'stream_id': uid(), 'sample_rate': 44100, 'channels': 1}})}
+        socket = self.run_socket(self.api, s['session_id'], [bad])
+        self.assertEqual([m['data']['code'] for m in socket.sent if m['type'] == 'error'], ['VALIDATION_ERROR'])
+
+    def test_resumed_stream_skips_already_received_frames(self):
+        s = self.live_lecture()
+        stream = uid()
+        start = {'text': dumps({'type': 'audio.start', 'data': {'stream_id': stream, 'sample_rate': 16000, 'channels': 1}})}
+        self.run_socket(self.api, s['session_id'], [start] + [{'bytes': frame(stream, n)} for n in range(20)])
+        self.assertEqual(self.row('SELECT stt_status FROM lecture_sessions')['stt_status'], 'DEGRADED')
+        stt = FakeSTT()
+        socket = self.run_socket(self.api, s['session_id'], [start] + [{'bytes': frame(stream, n)} for n in range(15, 25)], stt)
+        accepted = [m for m in socket.sent if m['type'] == 'audio.accepted'][0]
+        self.assertEqual(accepted['data']['next_sequence'], 20)
+        self.assertEqual(stt.frames, 5)
+        self.assertEqual(self.row('SELECT stt_status FROM lecture_sessions')['stt_status'], 'DEGRADED')
+
+    def test_oversized_frame_closes_with_1009(self):
+        s = self.live_lecture()
+        stream = uid()
+        start = {'text': dumps({'type': 'audio.start', 'data': {'stream_id': stream, 'sample_rate': 16000, 'channels': 1}})}
+        socket = self.run_socket(self.api, s['session_id'], [start, {'bytes': b'\x00' * (32 * 1024 + 1)}])
+        self.assertEqual(socket.closed, 1009)
+
+    def test_event_hub_delivers_only_what_each_connection_may_see(self):
+        import asyncio
+        from easyq.live import EventHub, LiveConnection
+        s, _ = self.lecture()
+        member = self.audience(s)
+        hub = EventHub(self.service)
+        host = LiveConnection(self.service, hub, FakeSTT(), FakeSocket([]), s['session_id'], {'origin': self.settings.origin}, dict(self.api.cookies))
+        guest = LiveConnection(self.service, hub, FakeSTT(), FakeSocket([]), s['session_id'], {'origin': self.settings.origin}, dict(member.cookies))
+
+        async def scenario():
+            self.assertTrue(await host.authorize())
+            self.assertTrue(await guest.authorize())
+            await hub.poll_once()   # first poll only records the current end of the event log
+            hub.subscribe(host)
+            hub.subscribe(guest)
+            self.api.call('POST', '/api/v1/sessions/' + s['session_id'] + '/documents', upload=('d.pptx', PPTX, pptx()), headers={'idempotency-key': uid()})
+            with self.db.transaction() as tx:
+                self.service.event(tx, 'session.updated', {'participant_count': 1}, s['session_id'])
+                self.service.event(tx, 'auth.csrf_rotated', {'auth_session_id': str(host.principal['auth_session_id'])})
+            await hub.poll_once()
+            def drain(c):
+                items = []
+                while not c.outbox.empty():
+                    items.append(c.outbox.get_nowait()['type'])
+                return items
+            return drain(host), drain(guest)
+        host_events, guest_events = asyncio.run(scenario())
+        self.assertEqual(host_events, ['document.updated', 'session.updated', 'auth.csrf_rotated'])
+        self.assertEqual(guest_events, ['session.updated'])
+
+    # ------------------------------------------------- review fixes ----
+    def test_event_hub_delivers_events_committed_out_of_id_order(self):
+        import asyncio
+        from easyq.live import EventHub
+        s, _ = self.lecture()
+        hub = EventHub(self.service)
+        seen = []
+
+        class Sink:
+            def offer(self, row):
+                seen.append(row['event_id'])
+
+        def insert(event_id):
+            with self.db.transaction() as tx:
+                tx.execute("INSERT INTO ws_events(event_id,event_type,payload,session_id,expires_at) VALUES(%s,'session.updated','{}',%s,%s)",
+                           (event_id, s['session_id'], self.moment + timedelta(hours=1)))
+
+        async def scenario():
+            await hub.poll_once()
+            hub.subscribe(Sink())
+            top = hub.last_event_id
+            insert(top + 10)          # committed first, higher id
+            await hub.poll_once()
+            insert(top + 5)           # lower id that committed later
+            await hub.poll_once()
+            await hub.poll_once()     # never delivered twice
+            return top
+        top = asyncio.run(scenario())
+        self.assertEqual(seen, [top + 10, top + 5])
+
+    def test_stt_consent_withdrawal_stops_stream_and_discards_speech(self):
+        from unittest.mock import patch
+        s = self.live_lecture()
+        sid, stream = s['session_id'], uid()
+        start = {'text': dumps({'type': 'audio.start', 'data': {'stream_id': stream, 'sample_rate': 16000, 'channels': 1}})}
+
+        def withdraw():
+            self.moment += timedelta(seconds=1)   # consents are ordered by recorded_at
+            self.api.call('POST', '/api/v1/sessions/' + sid + '/consents', {'purpose': 'STT', 'policy_version': 'stt-v1', 'granted': False})
+        script = [start] + [{'bytes': frame(stream, n)} for n in range(15)] + [withdraw, {'sleep': 0.3}]
+        script += [{'bytes': frame(stream, n)} for n in range(15, 20)]
+        stt = FakeSTT()
+        with patch('easyq.live.STATE_SECONDS', 0.05):
+            socket = self.run_socket(self.api, sid, script, stt)
+        self.assertEqual(stt.frames, 15)                      # nothing relayed after the withdrawal
+        self.assertEqual(self.row("SELECT count(*) n FROM knowledge_chunks WHERE source_type='TRANSCRIPT'")['n'], 0)
+        self.assertEqual(self.row('SELECT stt_status FROM lecture_sessions')['stt_status'], 'STOPPED')
+        self.assertIn('FORBIDDEN', [m['data'].get('code') for m in socket.sent if m['type'] == 'error'])
+
+    def test_two_host_tabs_cannot_both_start_audio(self):
+        import asyncio
+        from easyq.live import EventHub, LiveConnection
+        s = self.live_lecture()
+        hub = EventHub(self.service)
+        tabs = [LiveConnection(self.service, hub, FakeSTT(), FakeSocket([]), s['session_id'], {'origin': self.settings.origin},
+                               dict(self.api.cookies)) for _ in range(2)]
+
+        async def scenario():
+            for tab in tabs:
+                await tab.authorize()
+            await asyncio.gather(*(tab.on_audio_start({'stream_id': uid(), 'sample_rate': 16000, 'channels': 1}) for tab in tabs))
+            started = [tab for tab in tabs if tab.audio]
+            errors = [tab.outbox.get_nowait()['data']['code'] for tab in tabs if not tab.audio]
+            for tab in started:
+                await tab.stop_stream('PAUSED', ('RUNNING',))
+            return len(started), errors
+        self.assertEqual(asyncio.run(scenario()), (1, ['SESSION_STATE_CONFLICT']))
+
+    def test_stream_cleanup_releases_lecture_even_when_stt_close_fails(self):
+        from easyq.live import LiveConnection
+        s = self.live_lecture()
+        sid, stream = s['session_id'], uid()
+
+        def start(stream_id):
+            return {'text': dumps({'type': 'audio.start', 'data': {'stream_id': stream_id, 'sample_rate': 16000, 'channels': 1}})}
+        script = [start(stream)] + [{'bytes': frame(stream, n)} for n in range(10)]
+        script += [{'text': dumps({'type': 'audio.stop', 'data': {'stream_id': stream.upper()}})}]
+        self.run_socket(self.api, sid, script, FailingSTT(fail_close=True))
+        self.assertEqual(self.row('SELECT stt_status FROM lecture_sessions')['stt_status'], 'PAUSED')   # uppercase stream_id accepted
+        self.assertIsNone(LiveConnection.streams[sid]['connection'])
+        path = '/api/v1/sessions/' + sid
+        self.api.call('PATCH', path, {'stt_status': 'RUNNING'}, headers={'if-match': self.api.call('GET', path)[2]['etag']})
+        other = self.run_socket(self.api, sid, [start(uid())])
+        self.assertIn('audio.accepted', [m['type'] for m in other.sent])
+
+    def test_stt_provider_failure_marks_lecture_degraded_once(self):
+        s = self.live_lecture()
+        stream = uid()
+        start = {'text': dumps({'type': 'audio.start', 'data': {'stream_id': stream, 'sample_rate': 16000, 'channels': 1}})}
+        script = [start] + [{'bytes': frame(stream, n)} for n in range(30)]
+        socket = self.run_socket(self.api, s['session_id'], script, FailingSTT(fail_send=True))
+        self.assertEqual(self.row('SELECT stt_status FROM lecture_sessions')['stt_status'], 'DEGRADED')
+        degraded = [m for m in socket.sent if m['type'] == 'stt.status' and m['data']['status'] == 'DEGRADED']
+        self.assertEqual(len(degraded), 1)
+
+    def test_failed_ingest_never_revives_a_deleting_document(self):
+        s, _ = self.lecture()
+        self.api.call('POST', '/api/v1/sessions/' + s['session_id'] + '/documents', upload=('d.pptx', PPTX, pptx()),
+                      headers={'idempotency-key': uid()})
+        with self.db.transaction() as tx:
+            tx.execute("UPDATE documents SET status='DELETING'")
+        self.drain()
+        self.assertEqual(self.row('SELECT status FROM documents')['status'], 'DELETING')
 
 if __name__ == '__main__':
     unittest.main()

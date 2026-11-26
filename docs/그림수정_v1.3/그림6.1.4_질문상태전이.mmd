@@ -1,9 +1,0 @@
-stateDiagram-v2
-    direction TB
-    [*] --> QUEUED: 질문 등록
-    QUEUED --> PROCESSING: 작업 점유
-    PROCESSING --> AI_ANSWERED: 판정·인용 검증 통과
-    PROCESSING --> ESCALATED: 판정 미달 · 근거 부족 · 처리 실패
-    AI_ANSWERED --> ESCALATED: 강연자 철회 · LIVE
-    ESCALATED --> COMPLETED: 답변 완료 · LIVE
-    COMPLETED --> ESCALATED: 완료 취소 · LIVE

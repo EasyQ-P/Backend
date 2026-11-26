@@ -19,6 +19,8 @@ class Settings:
     embedding_url: str = ""
     embedding_key: str = ""
     embedding_model: str = ""
+    stt_model: str = ""
+    stt_api_key: str = ""
     retrieval_version: str = "easyq-v0.3-768-c800-o100"
     smtp_host: str = ""
     smtp_port: int = 587
@@ -56,6 +58,7 @@ class Settings:
             auth_url=os.environ.get("AUTH_BASE_URL", "http://auth:8000"),
             embedding_url=os.environ.get("EMBEDDING_URL", ""), embedding_key=os.environ.get("EMBEDDING_API_KEY", ""),
             embedding_model=os.environ.get("EMBEDDING_MODEL", ""),
+            stt_model=os.environ.get("STT_MODEL", ""), stt_api_key=os.environ.get("STT_API_KEY", ""),
             smtp_host=os.environ.get("SMTP_HOST", ""), smtp_port=int(os.environ.get("SMTP_PORT", "587")),
             smtp_user=os.environ.get("SMTP_USER", ""), smtp_password=os.environ.get("SMTP_PASSWORD", ""),
             smtp_from=os.environ.get("SMTP_FROM", ""), smtp_starttls=os.environ.get("SMTP_STARTTLS", "true").lower() == "true",

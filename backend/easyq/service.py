@@ -49,13 +49,14 @@ class Service:
             raise error
         if isinstance(result.data, dict) and result.data.pop('_guest_exchange', False):
             pid = result.data['participant_id']
-            retry_cookie = self.join_retry_cookie(result.data['session_id'], pid)
+            marker = pid + '.' + credential_hash(self.settings.hmac_key, 'guest-retry', result.data['session_id'], pid)
+            retry_cookie = 'easyq_join_retry=' + marker + '; Path=/api/v1/participations; HttpOnly; SameSite=Lax; Max-Age=600' + ('; Secure' if self.settings.cookie_secure else '')
             try:
                 exchange = self.guest_client.issue(pid, uid())
             except Exception:
                 raise APIError(503, 'AUTH_SERVICE_UNAVAILABLE', headers={'Set-Cookie': retry_cookie}) from None
             result.data.update(csrf_token=exchange['csrf_token'], expires_at=exchange['expires_at'])
-            result.headers['Set-Cookie'] = [exchange['set_cookie'], retry_cookie]
+            result.headers['Set-Cookie'] = exchange['set_cookie']
         if mode == 'backend' and isinstance(result.data, dict) and result.data.get('my_role') == 'HOST' and result.data.get('status') == 'LIVE' and hasattr(self.guest_client, 'renew'):
             try:
                 with self.db.transaction() as tx:
@@ -68,36 +69,18 @@ class Service:
                 pass  # Existing valid sessions keep working while auth is down.
         return result
 
-    JOIN_RETRY_SECONDS = 24 * 3600  # same as guest authentication (7.1.1: 24 hours after entry)
-
-    def join_retry_cookie(self, sid, pid):
-        """Entry-confirmation cookie (7.1.1): finds the same guest participant again; never authenticates."""
-        expires = int(self.clock().timestamp()) + self.JOIN_RETRY_SECONDS
-        signature = credential_hash(self.settings.hmac_key, 'guest-retry', sid, f'{pid}:{expires}')
-        return (f'easyq_join_retry={pid}.{expires}.{signature}; Path=/api/v1/participations; HttpOnly; SameSite=Lax; '
-                f'Max-Age={self.JOIN_RETRY_SECONDS}' + ('; Secure' if self.settings.cookie_secure else ''))
-
-    def join_retry_participant(self, sid, marker):
-        parts = marker.split('.')
-        if len(parts) != 3 or not parts[1].isdigit() or int(parts[1]) <= self.clock().timestamp():
-            return None
-        pid, expires, signature = parts
-        if not hmac.compare_digest(signature, credential_hash(self.settings.hmac_key, 'guest-retry', sid, f'{pid}:{expires}')):
-            return None
-        return uuid_value(pid)
-
     def event(self, tx, event_type, payload, sid=None):
         row = tx.one("""INSERT INTO ws_events(event_type,payload,session_id,expires_at)
             VALUES(%s,%s,%s,%s) RETURNING event_id""",
             (event_type, dumps(payload), sid, self.clock() + timedelta(hours=24)))
         tx.notify(row['event_id'])
 
-    def job(self, tx, kind, target, key, payload, user=None, sid=None, participant=None, when=None, client_key=None, request_hash=None):
+    def job(self, tx, kind, target, key, payload, user=None, sid=None, participant=None, when=None):
         jid = uid()
-        tx.execute("""INSERT INTO jobs(job_id,job_type,target_id,idempotency_key,client_request_key,request_hash,payload,
+        tx.execute("""INSERT INTO jobs(job_id,job_type,target_id,idempotency_key,payload,
             requested_by,session_id,participant_id,available_at)
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (jid, kind, target, key, client_key, request_hash, dumps(payload), user, sid, participant, when or self.clock()))
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (jid, kind, target, key, dumps(payload), user, sid, participant, when or self.clock()))
         return jid
 
     def rate(self, tx, purpose, identity, limit, seconds=3600, gap=0, count=True):
@@ -158,6 +141,12 @@ class Service:
         value = req.headers.get('x-csrf-token', '')
         if not value or not hmac.compare_digest(digest(value), principal['csrf_token_hash']):
             raise APIError(403, 'FORBIDDEN')
+
+    def require_admin(self, principal):
+        """Admin APIs (7.1.1): ADMIN role of the current account, never the HOST/participant relation."""
+        if not principal or not principal['user_id'] or principal['user_role'] != 'ADMIN':
+            raise APIError(403, 'FORBIDDEN')
+        return str(principal['user_id'])
 
     def member(self, principal):
         if not principal or not principal['user_id']:
@@ -253,7 +242,7 @@ class Service:
         service = consent(b['consents']['SERVICE'])
         training = consent(b['consents'].get('TRAINING', {'policy_version': 'training-v1', 'granted': False}))
         if not service['granted']:
-            raise APIError(403, 'CONSENT_REQUIRED')
+            raise APIError(422, 'CONSENT_REQUIRED')
         self.mail_rate(tx, address, req.ip)
         tx.lock('email:' + address)
         if tx.one('SELECT user_id FROM users WHERE email=%s', (address,)):
@@ -347,7 +336,7 @@ class Service:
 
     def participant(self, tx, sid, principal):
         column, value = ('user_id', principal['user_id']) if principal['user_id'] else ('participant_id', principal['participant_id'])
-        # archived = the lecture is in the member's archive (8.2.8); guests are always false.
+        # archived = the lecture is in the member's archive (8.2.8: default true, false after archive delete; guests false).
         return tx.one(f"SELECT * FROM participants WHERE session_id=%s AND {column}=%s AND status='ACTIVE' AND (kind='GUEST' OR archived=true)", (sid, value))
 
     def session_public(self, tx, s, p, include_code=False):
@@ -361,20 +350,14 @@ class Service:
         for purpose in ('SERVICE', 'TRAINING', 'STT'):
             c = self.effective(tx, purpose, user=p['user_id'], participant=participant['participant_id'] if participant else None, sid=s['session_id'])
             data['my_consents'][purpose] = {'granted': bool(c['granted']), 'policy_version': c['policy_version']} if c else None
-        if include_code:
-            data.update(join_code=s['join_code'], join_url=self.settings.origin + '/join?code=' + s['join_code'])
+        if owner or include_code:
+            # 7.3.1 Session: join_code · join_url · terms only for the HOST.
+            data.update(join_code=s['join_code'], join_url=self.settings.origin + '/join?code=' + s['join_code'],
+                        terms=list(obj(s['terms']) or []))
         return data
 
     def participant_count(self, tx, sid):
         return tx.one("SELECT count(*) AS n FROM participants WHERE session_id=%s AND status='ACTIVE'", (sid,))['n']
-
-    def capacity_count(self, tx, sid):
-        """Capacity 50 (7.3.3 API-19): members, and guests with a live session or joined in the last 10 minutes."""
-        now = self.clock()
-        return tx.one("""SELECT count(*) AS n FROM participants p WHERE p.session_id=%s AND p.status='ACTIVE'
-            AND (p.kind='MEMBER' OR p.joined_at > %s OR EXISTS (SELECT 1 FROM auth_session_view v
-                 WHERE v.participant_id=p.participant_id AND v.revoked_at IS NULL AND v.expires_at > %s))""",
-            (sid, now - timedelta(minutes=10), now))['n']
 
     def code(self, tx):
         # Serialize allocation across current and immediately revoked code namespaces.
@@ -383,7 +366,7 @@ class Service:
             code = ''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(5))
             if not tx.one('SELECT session_id FROM lecture_sessions WHERE join_code=%s OR previous_join_code=%s', (code, code)):
                 return code
-        raise APIError(503, 'DEPENDENCY_UNAVAILABLE')
+        raise APIError(503, 'SERVICE_UNAVAILABLE')
 
     def version(self, req, lecture):
         if req.headers.get('if-match') != f'"{lecture["version"]}"':
@@ -473,21 +456,19 @@ class Service:
         self.check_invalid_join_rate(tx, ip)
         s = tx.one('SELECT * FROM lecture_sessions WHERE join_code=%s FOR UPDATE', (code,))
         if not s:
-            self.rate(tx, 'invalid-join', ip, self.INVALID_JOIN_LIMIT, 900)
+            self.rate(tx, 'invalid-join', ip, 20, 900)
             bucket = credential_hash(self.settings.hmac_key, 'rate', 'invalid-join', ip)
-            tx.execute('UPDATE auth_rate_limits SET expires_at=%s WHERE bucket_key=%s AND request_count>=%s', (self.clock() + timedelta(minutes=15), bucket, self.INVALID_JOIN_LIMIT))
+            tx.execute('UPDATE auth_rate_limits SET expires_at=%s WHERE bucket_key=%s AND request_count>=20', (self.clock() + timedelta(minutes=15), bucket))
             revoked = tx.one('SELECT session_id FROM lecture_sessions WHERE previous_join_code=%s', (code,))
             raise APIError(410 if revoked else 404, 'JOIN_CODE_REVOKED' if revoked else 'JOIN_CODE_INVALID', commit=True)
         if s['status'] not in ('DRAFT', 'LIVE') or s['host_deleted_at']:
             raise APIError(409, 'SESSION_ENDED', commit=True)
         return s
 
-    INVALID_JOIN_LIMIT = 100  # 7.1.2: classrooms share one IP
-
     def check_invalid_join_rate(self, tx, ip):
         bucket = credential_hash(self.settings.hmac_key, 'rate', 'invalid-join', ip)
         row = tx.one('SELECT * FROM auth_rate_limits WHERE bucket_key=%s ORDER BY window_start DESC LIMIT 1', (bucket,))
-        if row and row['request_count'] >= self.INVALID_JOIN_LIMIT and dt(row['expires_at']) > self.clock():
+        if row and row['request_count'] >= 20 and dt(row['expires_at']) > self.clock():
             raise APIError(429, 'RATE_LIMITED', commit=True, headers={'Retry-After': str(max(1, int((dt(row['expires_at']) - self.clock()).total_seconds())))})
 
     def guest_retry_id(self, sid, key):
@@ -514,8 +495,10 @@ class Service:
             marker = req.cookies.get('easyq_join_retry', '')
             if key:
                 retry_pid = self.guest_retry_id(sid, uuid_value(key))
-            elif marker:
-                retry_pid = self.join_retry_participant(sid, marker)
+            elif '.' in marker:
+                candidate, signature = marker.split('.', 1)
+                if hmac.compare_digest(signature, credential_hash(self.settings.hmac_key, 'guest-retry', sid, candidate)):
+                    retry_pid = uuid_value(candidate)
         if retry_pid:
             tx.lock('guest:' + retry_pid)
             prior = tx.one('SELECT * FROM participants WHERE participant_id=%s', (retry_pid,))
@@ -527,7 +510,7 @@ class Service:
         if user_id and not existing:
             # UNIQUE(session_id,user_id) covers REVOKED/archived rows too: reactivate instead of inserting.
             previous = tx.one('SELECT * FROM participants WHERE session_id=%s AND user_id=%s', (sid, user_id))
-        if not existing and self.capacity_count(tx, sid) >= 50:
+        if not existing and self.participant_count(tx, sid) >= 50:
             raise APIError(409, 'SESSION_FULL')
         if user_id:
             self.require_service(tx, user=user_id)
@@ -633,15 +616,159 @@ class Service:
                 self.lecture(tx, sid, p, True)
                 rows = tx.all('SELECT document_id,file_name,status,stage,page_count,chunk_count,error_code FROM documents WHERE session_id=%s ORDER BY created_at,document_id', (sid,))
                 for r in rows:
-                    r['retryable'] = r['status'] == 'FAILED' and r['error_code'] not in ('DOCUMENT_INVALID', 'DOCUMENT_NO_TEXT')
+                    r['retryable'] = self.document_retryable(r)
                 return Result(200, {'items': rows, 'next_cursor': None, 'total_count': len(rows)})
+            retry = re.fullmatch(r'/documents/([^/]+)/retries', tail)
+            if retry and method == 'POST':
+                return self.retry_document(tx, req, p, sid, uuid_value(retry[1]))
+            if tail == '/terms' and method == 'PUT':
+                return self.save_terms(tx, req, p, sid)
+        if path == '/sessions' and method == 'GET':
+            return self.list_lectures(tx, req, p)
         if path.startswith('/jobs/') and method == 'GET':
             jid = uuid_value(path.split('/')[-1])
             job = tx.one('SELECT * FROM jobs WHERE job_id=%s', (jid,))
             if not job or not p['user_id'] or str(job['requested_by']) != str(p['user_id']):
                 raise APIError(404, 'RESOURCE_NOT_FOUND')
-            return Result(200, {k: job[k] for k in ['job_id', 'job_type', 'status', 'attempts', 'error_code', 'finished_at']} | {'resource_id': job['target_id']})
+            # 7.3.1 Job. result never carries document text or credentials (worker stores counts only).
+            return Result(200, {k: job[k] for k in ['job_id', 'job_type', 'status', 'attempts', 'error_code', 'finished_at']}
+                          | {'resource_id': job['target_id'], 'result': obj(job['result']) if job.get('result') is not None else None})
         raise APIError(404, 'RESOURCE_NOT_FOUND')
+
+    # ---- API-14 내 강연 · 보관함 강연 목록 -------------------------------------------------
+    def list_lectures(self, tx, req, p):
+        import base64
+        import json as _json
+        user_id = self.member(p)
+        q = req.query
+        if set(q) - {'scope', 'status', 'q', 'cursor', 'limit'} or q.get('scope') not in ('hosted', 'joined'):
+            raise APIError(422, 'VALIDATION_ERROR')
+        scope = q['scope']
+        try:
+            limit = int(q.get('limit', 20))
+        except ValueError:
+            raise APIError(422, 'VALIDATION_ERROR') from None
+        if not 1 <= limit <= 100:
+            raise APIError(422, 'VALIDATION_ERROR')
+        status = q.get('status')
+        if status is not None and (scope != 'hosted' or status not in ('DRAFT', 'LIVE', 'ENDED')):
+            raise APIError(422, 'VALIDATION_ERROR')
+        search = text(q['q'], 50) if 'q' in q else None
+        if search is not None and scope != 'joined':
+            raise APIError(422, 'VALIDATION_ERROR')
+        after = None
+        if q.get('cursor'):
+            try:
+                after = _json.loads(base64.urlsafe_b64decode(q['cursor'].encode()))
+                after = (dt(after['t']), uuid_value(after['id']))
+            except (ValueError, KeyError, TypeError):
+                raise APIError(422, 'VALIDATION_ERROR') from None
+        # Newest first by scheduled time; (scheduled_at, session_id) keeps the cursor stable.
+        if scope == 'hosted':
+            where, args = ['s.host_user_id=%s', 's.host_deleted_at IS NULL', "s.status IN ('DRAFT','LIVE','ENDED')"], [user_id]
+            if status:
+                where.append('s.status=%s')
+                args.append(status)
+            base = 'FROM lecture_sessions s WHERE ' + ' AND '.join(where)
+        else:
+            where = ['a.user_id=%s', "a.kind='MEMBER'", 'a.archived=true', "s.status<>'DELETING'"]
+            args = [user_id]
+            if search:
+                # '!' as LIKE escape: same meaning in PostgreSQL and the SQLite test harness.
+                where.append("(lower(s.title) LIKE %s ESCAPE '!' OR lower(s.host_display_name) LIKE %s ESCAPE '!')")
+                needle = '%' + search.lower().replace('!', '!!').replace('%', '!%').replace('_', '!_') + '%'
+                args += [needle, needle]
+            base = 'FROM lecture_sessions s JOIN participants a ON a.session_id=s.session_id WHERE ' + ' AND '.join(where)
+        total = tx.one('SELECT count(*) AS n ' + base, tuple(args))['n']
+        page_where, page_args = '', list(args)
+        if after:
+            page_where = ' AND (s.scheduled_at<%s OR (s.scheduled_at=%s AND s.session_id<%s))'
+            page_args += [after[0], after[0], after[1]]
+        rows = tx.all('SELECT s.* ' + base + page_where + ' ORDER BY s.scheduled_at DESC, s.session_id DESC LIMIT %s',
+                      tuple(page_args + [limit + 1]))
+        items = []
+        for s in rows[:limit]:
+            data = self.session_public(tx, s, p)
+            if scope == 'joined':
+                data['my_question_count'] = tx.one("""SELECT count(*) AS n FROM questions q JOIN participants a
+                    ON a.participant_id=q.participant_id WHERE q.session_id=%s AND a.user_id=%s AND q.deleted_at IS NULL""",
+                    (s['session_id'], user_id))['n']
+            items.append(data)
+        cursor = None
+        if len(rows) > limit:
+            last = rows[limit - 1]
+            cursor = base64.urlsafe_b64encode(_json.dumps({'t': str(last['scheduled_at']), 'id': str(last['session_id'])}).encode()).decode()
+        return Result(200, {'items': items, 'next_cursor': cursor, 'total_count': total})
+
+    # ---- API-25 전문용어 사전 저장 ------------------------------------------------------
+    TERMS_MAX, TERM_LENGTH = 100, 40
+
+    def normalize_terms(self, values):
+        """Trim, drop case-insensitive duplicates (first spelling wins), keep order."""
+        seen, result = set(), []
+        for value in values:
+            term = ' '.join(value.split())
+            if term.casefold() not in seen:
+                seen.add(term.casefold())
+                result.append(term)
+        return result
+
+    def save_terms(self, tx, req, p, sid):
+        s = self.lecture(tx, sid, p, True)
+        self.version(req, s)
+        fields(req.body, ['terms'], ['terms'])
+        values = req.body['terms']
+        if not isinstance(values, list) or any(not isinstance(v, str) or not 1 <= len(' '.join(v.split())) <= self.TERM_LENGTH for v in values):
+            raise APIError(422, 'VALIDATION_ERROR')
+        terms = self.normalize_terms(values)
+        if len(terms) > self.TERMS_MAX:
+            raise APIError(422, 'VALIDATION_ERROR')
+        if s['status'] != 'DRAFT':
+            raise APIError(409, 'SESSION_STATE_CONFLICT')
+        # 6.2.3: a term the host removes is remembered so document extraction never adds it again.
+        kept = {t.casefold() for t in terms}
+        removed = self.normalize_terms([t for t in (obj(s['removed_terms']) or []) + (obj(s['terms']) or []) if t.casefold() not in kept])
+        tx.execute('UPDATE lecture_sessions SET terms=%s,removed_terms=%s,version=version+1 WHERE session_id=%s',
+                   (dumps(terms), dumps(removed), sid))
+        version = s['version'] + 1
+        self.event(tx, 'session.updated', {'session_id': sid, 'status': s['status'], 'version': version}, sid)
+        return Result(200, {'terms': terms, 'version': version}, {'ETag': f'"{version}"'})
+
+    # ---- API-23 교안 처리 재시도 ------------------------------------------------------
+    PARSE_FAILED = 'DOCUMENT_PARSE_FAILED'
+
+    def document_retryable(self, document):
+        return document['status'] == 'FAILED' and document['error_code'] != self.PARSE_FAILED
+
+    def retry_document(self, tx, req, p, sid, did):
+        import hashlib
+        s = self.lecture(tx, sid, p, True)
+        fields(req.body, [])
+        key = uuid_value(req.headers.get('idempotency-key'))
+        job_key = 'ingest-retry:' + str(p['user_id']) + ':' + did + ':' + key
+        fingerprint = hashlib.sha256(('retry:' + sid + ':' + did).encode()).hexdigest()
+        tx.lock(job_key)
+        prior = tx.one('SELECT * FROM jobs WHERE idempotency_key=%s', (job_key,))
+        if prior:
+            if obj(prior['payload']).get('fingerprint') != fingerprint:
+                raise APIError(409, 'IDEMPOTENCY_CONFLICT')
+            return Result(202, {'resource_id': prior['target_id'], 'job_id': prior['job_id'], 'status': prior['status']}, {'Location': '/api/v1/jobs/' + str(prior['job_id'])})
+        document = tx.one('SELECT * FROM documents WHERE session_id=%s AND document_id=%s FOR UPDATE', (sid, did))
+        if not document or document['status'] == 'DELETING':
+            raise APIError(404, 'RESOURCE_NOT_FOUND')
+        if s['status'] not in ('DRAFT', 'LIVE'):
+            raise APIError(409, 'SESSION_STATE_CONFLICT')
+        if not self.document_retryable(document):
+            raise APIError(409, 'DOCUMENT_NOT_RETRYABLE')
+        # Same S3 original, from the first stage: drop earlier chunks/vectors and any job still waiting (e.g. budget HELD).
+        tx.execute("UPDATE jobs SET status='CANCELLED',finished_at=%s WHERE job_type='INGEST' AND target_id=%s AND status IN ('QUEUED','HELD')",
+                   (self.clock(), did))
+        tx.execute("DELETE FROM knowledge_chunks WHERE session_id=%s AND document_id=%s", (sid, did))
+        tx.execute("""UPDATE documents SET status='PENDING',stage='UPLOADED',error_code=NULL,page_count=NULL,chunk_count=NULL,
+            terms=%s WHERE document_id=%s""", (dumps([]), did))
+        jid = self.job(tx, 'INGEST', did, job_key, {'fingerprint': fingerprint, 'retry': True}, user=str(p['user_id']), sid=sid)
+        self.event(tx, 'document.updated', {'document_id': did, 'status': 'PENDING', 'stage': 'UPLOADED'}, sid)
+        return Result(202, {'resource_id': did, 'job_id': jid, 'status': 'QUEUED'}, {'Location': '/api/v1/jobs/' + jid})
 
     def auth_route(self, tx, req, path):
         method, b = req.method, req.body
@@ -682,7 +809,7 @@ class Service:
                 raise APIError(403, 'FORBIDDEN')
             csrf = token()
             tx.execute('UPDATE auth_sessions SET csrf_token_hash=%s WHERE auth_session_id=%s', (digest(csrf), p['auth_session_id']))
-            self.event(tx, 'auth.csrf_rotated', {'auth_session_id': str(p['auth_session_id'])})
+            self.event(tx, 'auth.csrf_rotated',{'auth_session_id': str(p['auth_session_id'])})
             return Result(200, {'csrf_token': csrf})
         if path == '/me' and method == 'GET':
             user_id = self.member(p)
@@ -758,9 +885,10 @@ class Service:
                 self.event(tx, 'session.updated', {'stt_status': 'STOPPED'}, sid)
             if sid and purpose == 'SERVICE':
                 if owner:
-                    # 7.3.3 API-20: LIVE ends (end_reason HOST); DRAFT stays and API-16 start re-checks SERVICE.
                     if s['status'] == 'LIVE':
                         self.end(tx, s)
+                    else:
+                        raise APIError(409, 'SESSION_STATE_CONFLICT')
                 else:
                     g = self.participant(tx, sid, p)
                     tx.execute("UPDATE participants SET status='REVOKED' WHERE participant_id=%s", (g['participant_id'],))
@@ -779,15 +907,13 @@ class Service:
         filename, media, content = req.file
         validate_document(filename, media, content, self.settings)
         key = uuid_value(req.headers.get('idempotency-key'))
-        # 7.1.2 / 8.2.28: client key = HMAC(subject, job type, key); request_hash = body hash.
-        client_key = credential_hash(self.settings.hmac_key, 'idempotency', str(p['user_id']) + ':INGEST', key)
+        job_key = 'ingest:' + str(p['user_id']) + ':' + sid + ':' + key
         import hashlib
-        file_hash = hashlib.sha256(content).hexdigest()
-        fingerprint = hashlib.sha256(content + filename.encode() + media.encode() + sid.encode()).hexdigest()
-        tx.lock('idempotency:' + client_key)
-        prior = tx.one('SELECT * FROM jobs WHERE client_request_key=%s', (client_key,))
+        fingerprint = hashlib.sha256(content + filename.encode() + media.encode()).hexdigest()
+        tx.lock(job_key)
+        prior = tx.one('SELECT * FROM jobs WHERE idempotency_key=%s', (job_key,))
         if prior:
-            if prior['request_hash'] != fingerprint:
+            if obj(prior['payload'])['fingerprint'] != fingerprint:
                 raise APIError(409, 'IDEMPOTENCY_CONFLICT')
             return Result(202, {'resource_id': prior['target_id'], 'job_id': prior['job_id'], 'status': prior['status']}, {'Location': '/api/v1/jobs/' + str(prior['job_id'])})
         did = uid()
@@ -795,8 +921,8 @@ class Service:
         req._staged_object = object_key
         self.storage.put(object_key, content, media)
         # Object keys are generated; the user filename never becomes a filesystem path.
-        tx.execute("""INSERT INTO documents(document_id,session_id,file_name,object_key,media_type,size_bytes,sha256,stage)
-            VALUES(%s,%s,%s,%s,%s,%s,%s,'UPLOADED')""", (did, sid, filename, object_key, media, len(content), file_hash))
-        jid = self.job(tx, 'INGEST', did, 'ingest:' + did, {}, user=str(p['user_id']), sid=sid, client_key=client_key, request_hash=fingerprint)
+        tx.execute("""INSERT INTO documents(document_id,session_id,file_name,object_key,media_type,size_bytes,stage)
+            VALUES(%s,%s,%s,%s,%s,%s,'UPLOADED')""", (did, sid, filename, object_key, media, len(content)))
+        jid = self.job(tx, 'INGEST', did, job_key, {'fingerprint': fingerprint}, user=str(p['user_id']), sid=sid)
         self.event(tx, 'document.updated', {'document_id': did, 'status': 'PENDING', 'stage': 'UPLOADED'}, sid)
         return Result(202, {'resource_id': did, 'job_id': jid, 'status': 'QUEUED'}, {'Location': '/api/v1/jobs/' + jid})

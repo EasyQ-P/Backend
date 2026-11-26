@@ -4,7 +4,7 @@
 
 설계 기준은 `설계서/(CodingAnt팀)설계서_v1.0(엄윤종,심주혜,신재우,조현준,최의찬).hwp` 하나다. 기존 `docs`의 이전 설계 문서는 구현 기준에서 제외했다. HWP의 6.1~6.2, 7.1~7.3, 8.2를 읽고 원본 진도표의 **v0.3 열에 O가 있는 행** 중 신재우 또는 조현준이 담당자로 적힌 행을 선정했다.
 
-DB 기준은 `DB 스키마파일/easyq_schema_v1.3.sql`(설계 검토 반영 작업본, 권한은 `easyq_grants_v1.3.sql`)이다. v1.2 원본은 복합 FK가 참조하는 UNIQUE 인덱스보다 먼저 만들어져 PostgreSQL에 적용되지 않는다. 학과 서버용 `easyq_training_registry_v1.2.sql`은 이번 서비스 서버의 DB 초기화에 적용하지 않는다. 두 SQL의 소유 서비스가 다르기 때문이다.
+DB 기준은 `DB 스키마파일/easyq_schema_v1.2.sql`이다(설계 v1.3 작업본은 팀 회의에서 반려되어 따르지 않는다). 원본 v1.2 SQL은 복합 FK가 참조하는 UNIQUE 인덱스보다 먼저 만들어져 PostgreSQL에서 502행(knowledge_chunks → documents)에서 실패했다. 내용은 그대로 두고 UNIQUE · 인덱스 블록을 FK 앞으로 옮기기만 했다. 학과 서버용 `easyq_training_registry_v1.2.sql`은 이번 서비스 서버의 DB 초기화에 적용하지 않는다. 두 SQL의 소유 서비스가 다르기 때문이다.
 
 | v0.3 기능 | 담당자(백엔드) | 구현 위치 | 관련 API |
 | --- | --- | --- | --- |
@@ -105,7 +105,7 @@ INT-03은 소유 LIVE 강연의 유효 회원 세션만 연장한다. 15분 간�
 
 QR 이미지는 설계서대로 프런트엔드에서 join_url을 QR로 렌더링한다. 백엔드는 랜덤 5자리 코드와 `/join?code=...`를 발급한다. current·previous 코드 전체에서 충돌하지 않도록 할당 잠금을 사용한다. 재발급 시 버전을 올리고 직전 코드를 previous_join_code로 옮긴다. 직전 코드는 410이며 그보다 오래된 코드는 404일 수 있다. 기존 참가 세션은 유지한다.
 
-`join_lookup`은 대소문자를 정규화하고 DRAFT/LIVE만 허용한다. 잘못되거나 폐기된 코드가 IP에서 15분 100회 누적되면(강의실은 여러 청중이 같은 IP를 쓴다) 15분 동안 입장을 차단한다. preview는 참가자를 생성하지 않는다.
+`join_lookup`은 대소문자를 정규화하고 DRAFT/LIVE만 허용한다. 잘못되거나 폐기된 코드가 IP에서 15분 20회 누적되면 15분 동안 입장을 차단한다. preview는 참가자를 생성하지 않는다.
 
 `join`은 강연 행 잠금 안에서 활성 청중 50명 한도를 검사한다. 같은 회원의 기존 참가와 유효한 게스트 재입장은 200이며 정원과 무관하다. HOST 자신의 강연에는 청중 참가를 만들지 않는다. 회원은 계정 SERVICE 동의를 쓰며 게스트는 필수 동의를 별도로 기록한다.
 
@@ -113,7 +113,7 @@ QR 이미지는 설계서대로 프런트엔드에서 join_url을 QR로 렌더�
 
 HWP의 API-19 예시에 맞춰 게스트 동의의 true/false를 받는다. 버전은 서버의 SERVICE_POLICY_VERSION/TRAINING_POLICY_VERSION으로 기록한다. 명시적인 `{policy_version,granted}` 객체도 지원한다. 원문의 설명 표와 예시 타입이 불일치하는 부분을 이 방식으로 수용했다.
 
-게스트 참가를 먼저 커밋한 후 INT-01로 auth에서 강연 전용 세션을 받는다. auth가 참가 기록을 별도 연결에서 읽을 수 있어야 하기 때문이다. 새 게스트 참가를 만들 때와 auth 실패(503) 때 서명한 `easyq_join_retry` HttpOnly 쿠키(참가 ID · 만료 시각 · HMAC, Path=/api/v1/participations, 입장 후 24시간)를 준다. 재요청은 게스트 세션 쿠키나 이 쿠키로 같은 참가자를 재사용한다. 정원은 회원 참가와, 유효한 게스트 세션이 있거나 입장 후 10분 이내인 게스트 참가만 센다. 선택적으로 UUID Idempotency-Key도 지원한다. 이 키는 참가자 ID로 그대로 쓰지 않고 HMAC(강연, 키)로 참가자 ID를 만든다. 다른 게스트의 participant_id를 알아도 그 참가를 이어받을 수 없다. 실패 응답의 쿠키까지 보존하지 못한 클라이언트에는 동일 참가 재사용을 보장할 수 없다.
+게스트 참가를 먼저 커밋한 후 INT-01로 auth에서 강연 전용 세션을 받는다. auth가 참가 기록을 별도 연결에서 읽을 수 있어야 하기 때문이다. auth 실패 시 서명한 짧은 `easyq_join_retry` HttpOnly 쿠키를 503과 함께 반환한다. 재요청은 같은 참가자를 재사용한다. 선택적으로 UUID Idempotency-Key도 지원한다. 이 키는 참가자 ID로 그대로 쓰지 않고 HMAC(강연, 키)로 참가자 ID를 만든다. 다른 게스트의 participant_id를 알아도 그 참가를 이어받을 수 없다. 실패 응답의 쿠키까지 보존하지 못한 클라이언트에는 동일 참가 재사용을 보장할 수 없다.
 
 INT-01은 게스트의 ACTIVE·DRAFT/LIVE·24시간 기한을 확인하고 기존 게스트 인증을 폐기한 후 새 쿠키를 발급한다. 내부 API는 서비스 키로 보호하고 Caddy 공개 경로에서 제외한다. worker 키는 INT-02 폐기에만 사용할 수 있다.
 
@@ -159,7 +159,7 @@ TRAINING 철회는 즉시 유효 동의에 반영하고 CLEANUP job을 만든다
 
 이번 환경에서 HTTP/ASGI 디코더와 실제 service·worker 코드, SQL 트랜잭션을 연결한 오프라인 테스트를 수행했다. SQLite는 제공 SQL의 테이블을 읽어 타입·PostgreSQL 잠금 문법만 조정한 테스트 전용 하네스다. 운영 코드에는 SQLite 우회가 없다. 메일·임베딩·스토리지 외부 경계는 대역을 사용했다. Windows의 로컬 socketpair 제한 때문에 ASGI 테스트는 네트워크 리스닝 없이 메시지를 전달하고, 실행기만 인라인으로 교체했다.
 
-실제 PostgreSQL 테스트는 같은 API 테스트를 원본 SQL과 뷰 migration을 수정 없이 적용한 임의 스키마에서 수행하도록 별도 작성했다. `EASYQ_TEST_DATABASE_URL`이 없으면 명시적으로 skip한다. 이번 환경에서는 PostgreSQL·Docker·psycopg·FastAPI 설치가 없고 패키지 저장소 DNS 접속이 실패해 **실제 PostgreSQL/pgvector, FastAPI/Uvicorn 기동, SMTP·S3·Gemini 연결, Kiwi 실제 분석은 검증하지 못했다.** 이를 성공으로 계산하지 않았다.
+실제 PostgreSQL 테스트는 같은 API 테스트를 v1.2 SQL과 뷰 migration을 적용한 임의 스키마에서 수행한다. `EASYQ_TEST_DATABASE_URL`이 없으면 명시적으로 skip한다. 2026-11-25에 로컬 PostgreSQL 16.2 + pgvector에서 50개가 통과했다. **FastAPI/Uvicorn 기동, SMTP·S3·Gemini 연결, Kiwi 실제 분석은 아직 검증하지 못했다.**
 
 특히 PostgreSQL의 FK/CHECK/HNSW·GIN, 동시 트랜잭션 경합·SKIP LOCKED의 실제 동작은 SQLite 결과로 보장하지 않는다. DB 생성 후 PostgreSQL 통합 테스트와 실제 제공자 smoke 확인이 남아 있다. 이 작업에서는 사용자 DB를 생성하거나 외부 서비스를 배포하지 않았다.
 
@@ -176,3 +176,21 @@ TRAINING 철회는 즉시 유효 동의에 반영하고 CLEANUP job을 만든다
 | 개인정보 90일 파기·탈퇴 | 종료 기한 기록 | 진도표 후속 버전의 PURGE·삭제 요청 |
 
 API-10 계정 수정, API-14 내 강연 목록, API-23 교안 수동 재시도, API-24 삭제와 후속 기능은 이번 v0.3의 두 담당자 행에 포함되지 않아 공개 구현 범위를 늘리지 않았다. 내부 자동 재시도는 워커 신뢰성을 위한 동작으로 포함했다.
+
+## 7. 2026-11-25 추가 구현 (진도표 v6의 v0.3 나머지)
+
+설계 v1.3 작업본이 반려되어 v1.2 반영본 기준으로 되돌린 뒤, 진도표 v6에서 v0.3으로 잡힌 나머지 백엔드 항목을 프로토타입 구조 그대로 추가했다. API별 계약은 `api-v0.3.md`에 있다.
+
+| 항목 | 구현 위치 | 내용 |
+| --- | --- | --- |
+| 전문용어 사전 | `service.save_terms`, `terms.py`, worker INGEST TERMS 단계 | API-25(DRAFT · If-Match · 정규화 · 100개), 지운 용어는 `removed_terms`로 기억. 교안 용어는 Kiwi 규칙(복합 명사 · 고유명사 · 약어 · 반복 영어 단어)으로 문서당 30개까지 뽑아 빈자리에 추가 |
+| 교안 처리 상태 · 재처리 | `service.retry_document`, worker | API-23, 원본 때문에 실패하면 `DOCUMENT_PARSE_FAILED`(재시도 불가), 처리 실패는 `INDEX_BUILD_FAILED` |
+| 내 강연 목록 | `service.list_lectures` | API-14 hosted · joined, cursor 페이지 |
+| Session 객체 | `service.session_public` | 강연자에게만 join_code · join_url · terms(7.3.1) |
+| 음성 · STT · 발화 색인 | `live.py`, `adapters.GeminiLiveSTT`, worker TRANSCRIPT_INDEX | 7.3.10 WebSocket, 메모리 중계, 30초 조각, 발화 색인 우선 점유 |
+| 관리자 로그인 | `admin.py`, `service.require_admin` | 서버 명령으로만 ADMIN 생성, API-04 로그인 |
+| 오류 코드 | worker `error_code`, http | 저장 · 응답 오류 코드를 8.4.2 표의 코드로 맞춤 |
+| 작업 무한 재점유 | worker `claim` | worker가 3번 죽은 작업은 FAILED로 끝낸다 |
+| eval_detection | worker | `check_status` PENDING/DONE, `eval_slide_version`(8.2.6) |
+
+설계와 다르거나 설계에 없는 부분: 용어 추출 방법(설계 미정, 팀이 Kiwi 규칙으로 결정), 발화 시각은 강연 시작 기준 ms(설계 미정), `audio.stop` 뒤 `stt_status=PAUSED` · 연결 끊김 뒤 `DEGRADED`(설계는 상태값만 정의), 직접 보내는 WebSocket 메시지(`transcript.final`, `audio.*`)는 event_id가 없다. 청킹은 AI 레포 태그가 나올 때까지 800자를 유지한다.

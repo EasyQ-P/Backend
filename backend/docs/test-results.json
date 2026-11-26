@@ -1,8 +1,8 @@
 {
-  "executed_at_utc": "2026-11-26T01:28:54.332747+00:00",
-  "duration_seconds": 123.126,
-  "total": 144,
-  "passed": 144,
+  "executed_at_utc": "2026-11-26T01:34:25.892493+00:00",
+  "duration_seconds": 162.075,
+  "total": 146,
+  "passed": 146,
   "failed": 0,
   "errors": 0,
   "skipped": 0,
@@ -39,6 +39,10 @@
     },
     {
       "test": "tests.test_api.APITests.test_code_expiry_and_reuse",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_api.APITests.test_csrf_failure_is_forbidden_with_reason_so_client_can_refresh_and_retry",
       "status": "passed"
     },
     {
@@ -327,6 +331,10 @@
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_concurrent_joins_cannot_exceed_capacity",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_postgres.PostgreSQLTests.test_csrf_failure_is_forbidden_with_reason_so_client_can_refresh_and_retry",
       "status": "passed"
     },
     {

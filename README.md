@@ -91,4 +91,4 @@ python -m pip install -r requirements.txt
 python -m unittest tests.test_api
 ```
 
-오프라인 테스트는 SQLite 하네스와 가짜 외부 연동으로 실제 서비스 · worker 코드를 실행합니다(현재 71개 통과, PostgreSQL 테스트 73개 통과). 실제 PostgreSQL 테스트는 `EASYQ_TEST_DATABASE_URL`을 설정해야 실행됩니다. 자세한 절차는 [backend/docs/runbook.md](backend/docs/runbook.md), 구현 설명은 [backend/docs/implementation-v0.3.md](backend/docs/implementation-v0.3.md)를 참고하세요.
+오프라인 테스트는 SQLite 하네스와 가짜 외부 연동으로 실제 서비스 · worker 코드를 실행합니다(현재 72개 통과, PostgreSQL 테스트 74개 통과). 실제 PostgreSQL 테스트는 `EASYQ_TEST_DATABASE_URL`을 설정해야 실행됩니다. 자세한 절차는 [backend/docs/runbook.md](backend/docs/runbook.md), 구현 설명은 [backend/docs/implementation-v0.3.md](backend/docs/implementation-v0.3.md)를 참고하세요.

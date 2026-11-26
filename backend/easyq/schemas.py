@@ -40,7 +40,7 @@ class User(Model):
 class ErrorBody(Model):
     code: str = Field(description='8.4.2 error code, e.g. VALIDATION_ERROR, FORBIDDEN')
     message: str
-    details: dict = Field(description='e.g. ACCOUNT_SUSPENDED → {"suspension_reason": "..."}')
+    details: dict = Field(description='e.g. ACCOUNT_SUSPENDED → {"suspension_reason": "..."}; CSRF 실패 FORBIDDEN → {"reason": "CSRF"}')
     retryable: bool
 
 
@@ -164,7 +164,7 @@ SPECS = {
                'errors': {401: 'AUTH_INVALID_CREDENTIALS', 403: 'EMAIL_NOT_VERIFIED · ACCOUNT_SUSPENDED(details.suspension_reason)',
                           422: 'VALIDATION_ERROR', 429: 'RATE_LIMITED'}},
     'API-05': {'cookie': True, 'csrf': True, 'ok': {204: (None, '로그아웃. Set-Cookie로 쿠키 만료(이미 만료된 세션도 204)')},
-               'errors': {403: 'FORBIDDEN(Origin · CSRF)'}},
+               'errors': {403: 'FORBIDDEN(Origin, 또는 CSRF 실패면 details.reason="CSRF")'}},
     'API-06': {'cookie': True, 'client_header': True, 'ok': {200: (CsrfData, '새 CSRF 토큰')},
                'errors': {401: 'AUTH_REQUIRED', 403: 'FORBIDDEN(Origin · X-EasyQ-Client)'}},
     'API-07': {'request': EmailRequest, 'ok': {202: (EmptyData, '가입 여부와 관계없이 같은 응답')},

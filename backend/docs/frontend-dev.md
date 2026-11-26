@@ -59,6 +59,7 @@ module.exports = {
 ## 4. 요청 규칙 요약 (7.1.2)
 
 - 변경 요청은 `Origin` 헤더가 필요하다. 로그인 후 변경 요청은 `X-CSRF-Token`도 보낸다(로그인 · 입장 응답의 `csrf_token`).
+- CSRF 실패는 `403 FORBIDDEN` + `details.reason = "CSRF"`다. 이 경우만 API-06으로 토큰을 다시 받아 원래 요청을 한 번 재시도한다.
 - 새로고침으로 CSRF 토큰을 잃으면 `POST /api/v1/auth/csrf-tokens`(헤더 `X-EasyQ-Client: web`)로 다시 받는다.
 - 성공은 `{request_id, data}`, 실패는 `{request_id, error:{code, message, details, retryable}}`.
 - 요청 · 응답 필드: Swagger(`/docs`)에 인증 API-01~09와 입장 API-18 · 19부터 들어 있다. 나머지는 `backend/docs/api-v0.3.md`.

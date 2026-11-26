@@ -10,6 +10,7 @@
 - 모든 공개 경로 앞에 `/api/v1`이 붙는다.
 - 성공 응답은 `{request_id, data}`, 실패 응답은 `{request_id, error:{code, message, details, retryable}}`이다. 204는 본문이 없다.
 - 변경 요청(GET 외)은 모두 `Origin`을 검사한다. 로그인이 필요한 변경 요청은 `X-CSRF-Token`도 검사한다.
+  - CSRF 토큰이 없거나 틀리면 `403 FORBIDDEN`에 `details: {"reason": "CSRF"}`가 붙는다. 이때 클라이언트는 API-06으로 토큰을 다시 받아 한 번만 재시도한다(다른 FORBIDDEN에는 reason이 없다).
   - 예외: 가입 · 인증 · 로그인 · 입장 · 재설정은 Origin 검사만 한다.
 - 인증 쿠키는 `easyq_session`(Secure · HttpOnly · SameSite=Lax · Path=/)이다. DB에는 토큰 해시만 저장한다.
 - 모든 응답에 `Cache-Control: no-store`와 `X-Request-ID`를 붙인다.
@@ -106,4 +107,4 @@
 - **STT 실제 연결:** google-genai Live API 어댑터는 실제 제공자로 검증하지 않았다(테스트는 가짜 STT). `STT_MODEL` · `STT_API_KEY`가 없으면 `audio.start`가 `STT_UNAVAILABLE`.
 - **활성 스트림 관리**는 backend 프로세스 1개를 전제로 한다(compose 구성과 같음).
 - **기준 설계:** 백엔드 v1.2 반영 설계서와 `easyq_schema_v1.2.sql`. v1.3 작업본은 팀 회의에서 반려되어 따르지 않는다.
-- **검증 범위:** 오프라인 테스트(SQLite 하네스) 71개와 실제 PostgreSQL 16 + pgvector 테스트 73개로 확인했다. FastAPI 기동 · 외부 연동(SMTP · S3 · Gemini)은 아직 검증하지 않았다.
+- **검증 범위:** 오프라인 테스트(SQLite 하네스) 72개와 실제 PostgreSQL 16 + pgvector 테스트 74개로 확인했다. FastAPI 기동 · 외부 연동(SMTP · S3 · Gemini)은 아직 검증하지 않았다.

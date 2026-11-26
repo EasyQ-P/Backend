@@ -1119,6 +1119,19 @@ class APITests(unittest.TestCase):
         for env in ({'PUBLIC_ORIGIN': 'http://localhost:3000'}, {'EASYQ_DEV_SEED': '1', 'PUBLIC_ORIGIN': 'https://easyq.example.com'}):
             with self.assertRaises(SystemExit):
                 check_development(env)
+    def test_csrf_failure_is_forbidden_with_reason_so_client_can_refresh_and_retry(self):
+        self.login()
+        body = {'title': '강연', 'scheduled_at': self.moment.isoformat()}
+        good, self.api.csrf = self.api.csrf, 'stale-token'
+        status, payload, _ = self.api.call('POST', '/api/v1/sessions', body)
+        self.assertEqual((status, payload['error']['code'], payload['error']['details']), (403, 'FORBIDDEN', {'reason': 'CSRF'}))
+        status, payload, _ = self.auth.call('DELETE', '/api/v1/auth/sessions/current', headers={'x-csrf-token': 'stale-token'})
+        self.assertEqual(payload['error']['details'], {'reason': 'CSRF'})
+        # Other FORBIDDEN causes carry no reason; refreshing (API-06) and retrying once succeeds.
+        status, payload, _ = self.api.call('POST', '/api/v1/sessions', body, headers={'origin': 'https://evil.test'})
+        self.assertEqual((status, payload['error']['details']), (403, {}))
+        self.api.csrf = good
+        self.assertEqual(self.api.call('POST', '/api/v1/sessions', body)[0], 201)
 
 if __name__ == '__main__':
     unittest.main()

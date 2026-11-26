@@ -140,7 +140,8 @@ class Service:
     def csrf(self, req, principal):
         value = req.headers.get('x-csrf-token', '')
         if not value or not hmac.compare_digest(digest(value), principal['csrf_token_hash']):
-            raise APIError(403, 'FORBIDDEN')
+            # Code stays FORBIDDEN (8.4.2); details.reason lets the client re-issue (API-06) and retry once.
+            raise APIError(403, 'FORBIDDEN', {'reason': 'CSRF'})
 
     def require_admin(self, principal):
         """Admin APIs (7.1.1): ADMIN role of the current account, never the HOST/participant relation."""

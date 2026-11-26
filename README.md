@@ -10,7 +10,7 @@ frontend · caddy · trainer(학습서버)는 이 레포의 범위가 아닙니�
 
 기준 설계는 **백엔드 v1.2 반영 설계서**다. 설계 v1.3 작업본은 팀 회의에서 반려되어 되돌렸다.
 
-`backend/easyq/`에 **v0.3 프로토타입**이 있습니다. 설계서 10.2의 목표 구조(`auth/`, `backend/app/…`, SQLAlchemy · Alembic · uv)와는 아직 다르며, 옮길 때는 팀에 먼저 알리고 진행합니다.
+코드는 컨테이너별로 `auth/` · `backend/` · `worker/`, 공용 코드는 `common/`에 있습니다. 목표 기술 스택(SQLAlchemy · Alembic · uv)으로의 전환은 아직입니다.
 
 | 상태 | 뜻 |
 |---|---|
@@ -71,7 +71,9 @@ frontend · caddy · trainer(학습서버)는 이 레포의 범위가 아닙니�
 ## 레포 구성
 
 ```
-backend/                 v0.3 프로토타입 (easyq/ 패키지, tests/, migrations/, docs/)
+common/ auth/ backend/ worker/   공용 코드와 컨테이너별 코드(각자 Dockerfile · requirements.txt)
+compose.yaml             로컬 개발 스택(바인드 마운트)
+migrations/ dev/ deploy/ tests/ scripts/ docs/service/
 DB 스키마파일/            easyq_schema_v1.2.sql (서비스 DB 기준), 학습서버 레지스트리 SQL
 설계서/                   원본 설계서 (HWP)
 docs/                    백엔드 v1.2 반영 설계서(HWPX), 팀 공유 보류사항 · 유스케이스 · Mermaid 원본
@@ -81,14 +83,13 @@ CLAUDE.md, CONTRIBUTING.md, .github/
 
 ## 프론트 연동용 로컬 개발 서버
 
-`cd backend; docker compose -f compose.dev.yaml up --build` — PostgreSQL · Mailpit · auth(:8001) · backend(:8000) · worker와 테스트 계정(member@easyq.local / admin@easyq.local)을 함께 띄운다. 프론트 프록시 설정과 계정은 [backend/docs/frontend-dev.md](backend/docs/frontend-dev.md).
+레포 루트에서 `docker compose up --build` — PostgreSQL · Mailpit(:8025) · auth(:8001) · backend(:8000) · worker · Caddy(http://localhost:8080)와 테스트 계정(member@easyq.local / admin@easyq.local)을 함께 띄운다. 코드는 바인드 마운트라 고치면 바로 반영된다. 자세한 내용은 [docs/service/frontend-dev.md](docs/service/frontend-dev.md).
 
 ## 실행 · 시험 (프로토타입)
 
 ```powershell
-cd backend
-python -m pip install -r requirements.txt
-python -m unittest tests.test_api
+python -m pip install -r common/requirements.txt -r auth/requirements.txt -r backend/requirements.txt -r worker/requirements.txt
+python -m unittest tests.test_api   # 레포 루트에서
 ```
 
-오프라인 테스트는 SQLite 하네스와 가짜 외부 연동으로 실제 서비스 · worker 코드를 실행합니다(현재 72개 통과, PostgreSQL 테스트 74개 통과). 실제 PostgreSQL 테스트는 `EASYQ_TEST_DATABASE_URL`을 설정해야 실행됩니다. 자세한 절차는 [backend/docs/runbook.md](backend/docs/runbook.md), 구현 설명은 [backend/docs/implementation-v0.3.md](backend/docs/implementation-v0.3.md)를 참고하세요.
+오프라인 테스트는 SQLite 하네스와 가짜 외부 연동으로 실제 서비스 · worker 코드를 실행합니다(현재 72개 통과, PostgreSQL 테스트 74개 통과). 실제 PostgreSQL 테스트는 `EASYQ_TEST_DATABASE_URL`을 설정해야 실행됩니다. 자세한 절차는 [docs/service/runbook.md](docs/service/runbook.md), 구현 설명은 [docs/service/implementation-v0.3.md](docs/service/implementation-v0.3.md)를 참고하세요.

@@ -1,0 +1,9 @@
+# Build context = repository root; send only the code the images need.
+*
+!common/
+!auth/
+!backend/
+!worker/
+**/__pycache__
+**/*.pyc
+backend/Dockerfile.zip

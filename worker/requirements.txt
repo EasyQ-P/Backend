@@ -1,0 +1,4 @@
+# worker container: PDF text, Korean morphology, SMTP mail.
+pypdf>=5,<7
+kiwipiepy>=0.20,<1
+fastapi-mail>=1.4,<2

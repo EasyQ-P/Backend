@@ -39,34 +39,36 @@ EasyQ: 강연 중 청중 질문에 교안 · 발화 근거로 AI가 답하고, �
 Python 3.12 · uv(lock 파일로 버전 고정) · FastAPI + Uvicorn · SQLAlchemy 2(async) · Pydantic v2 · Alembic · Ruff · pytest
 PostgreSQL 16 + pgvector(RDS) · S3 · kiwipiepy · PyMuPDF · python-pptx · google-genai(STT · 임베딩) · anthropic(Sonnet) · fastapi-mail(Gmail SMTP 587)
 
-## 구조 (설계서 6.1.1 · 10.2)
+## 구조 (컨테이너별, 2026-11-26 사용자 요청으로 재정리)
 
 ```
-auth/                     인증 서버(별도 이미지 · 프로세스, 내부 포트 8001)
-  app/main.py
-  app/api/                공개 API(/users, /auth/*, GET·PATCH /me), 내부 API(/internal/v1)
-  app/services/           가입 · 이메일 인증 · 비밀번호 · 세션 · 요청 한도
-backend/                  backend(API, 8000)와 worker가 같은 코드 · 이미지, 실행 명령만 다름
-  app/main.py             backend 진입점
-  app/worker.py           worker 진입점(작업 점유 · 실행 루프, 수신 포트 없음)
-  app/api/v1/             REST 라우터(리소스별 파일, admin/)
-  app/ws/                 WebSocket 연결 관리, ws_events · LISTEN 전달
-  app/models/             SQLAlchemy 모델(8.2 테이블과 1:1)
-  app/schemas/            Pydantic 스키마(7.3.1 공통 응답 객체)
-  app/services/           업무 로직
-  app/jobs/               worker 작업(교안 처리, 발화 색인, QA, 종료 정리, 요약, 메일, 동기화, 파기)
-  app/adapters/           stt, embedding, llm, judge, trainer_api, s3, mail, auth_internal
-  app/core/               설정, 보안(세션 확인 · CSRF), 로깅(8.3), 오류 코드(8.4)
-  migrations/             Alembic — auth · backend 공용 스키마 이력은 여기 한 곳
-  tests/
+compose.yaml              로컬 개발: 이미지에는 라이브러리만, 코드는 컨테이너마다 바인드 마운트(자동 재시작)
+common/easyq_common/      세 컨테이너 공용: core.py(ServiceCore: 실행 · 세션 확인 · CSRF · 동의 · 이벤트 · 작업 · 요청 한도 ·
+                          강연 접근 · 강연 종료), contracts, security, config, db, http(ASGI 전송 · OpenAPI), schemas(Swagger),
+                          storage(S3 · 로컬), auth_client(INT-01~03 호출)
+auth/                     인증 컨테이너(내부 8000, 개발 :8001) — Dockerfile, requirements.txt
+  easyq_auth/             main(앱), accounts(가입 · 인증 · 로그인 · 재설정), sessions(세션 · auth 경로 · 내부 API),
+                          admin(ADMIN 생성 명령), devseed(개발 테스트 계정)
+backend/                  backend 컨테이너(내부 8000) — Dockerfile, requirements.txt
+  easyq_backend/          main(앱 · WebSocket), routes, lectures, participation, consents, documents, stt(Gemini Live),
+                          live/(protocol · events · audio · connection: 7.3.10 WebSocket)
+worker/                   worker 컨테이너(수신 포트 없음) — Dockerfile, requirements.txt
+  easyq_worker/           main(루프), runner(점유 · lease · 재시도 · 유지보수), worker(조립), ingest, transcript, mail,
+                          cleanup, retrieval, terms, budget, embedding
+migrations/               001 인증 뷰, 002 실행 계정 권한(예시)
+dev/                      db-init(개발 계정), caddy(개발 Caddyfile), trainer-mock(학습서버 목업)
+deploy/                   Caddyfile.example(운영)
+tests/ · scripts/         SQLite 하네스 · PostgreSQL 시험, run_tests.py
+docs/service/             API 정리, 구현 설명, 실행 안내, 프론트 연동, 시험 결과
 ```
 
+- 설계서 10.2는 backend와 worker를 같은 이미지로 정의하지만, 사용자 요청으로 컨테이너별 폴더 · 이미지로 나눴다. 공용 코드는 `common/`에 두고 각 이미지가 함께 담는다.
+- 목표 기술 스택(SQLAlchemy async · Alembic · uv · pytest)으로의 전환은 아직이다. 전환할 때는 먼저 알린다.
 - 설계서 10.2는 frontend · caddy · trainer까지 한 저장소로 정의하지만, 팀은 레포를 나눴다: 이 레포(서비스), AI 레포(https://github.com/EasyQ-P/AI — trainer + retrieval), frontend 레포.
 - **공용 검색 모듈 `retrieval`(6.1.5)은 AI 레포에 있다.** 이 레포에 복사하거나 다시 만들지 않고, 태그로 고정해 설치한다.
   - `uv add "retrieval @ git+https://github.com/EasyQ-P/AI@vX.Y.Z#subdirectory=retrieval"`
   - 청킹 · 키워드 색인 · RRF 검색 · 겹침 계산 · 검색 설정 버전(rc-vN)을 바꿔야 하면 AI 레포에 요청(최의찬)하고, 새 태그가 나오면 이쪽 버전을 올린다.
 - worker의 R2~R4(STT 중계 · 발화 색인 · 검색 · 판정 · 답변) 서비스 코드는 이 레포에서 작업한다(AI 레포 README와 같은 기준).
-- 기존 `backend/easyq/`(v0.3 프로토타입)는 위 구조와 다르다. 새 구조로 옮기거나 재사용할 때는 먼저 알린다.
 
 ## 핵심 규칙
 

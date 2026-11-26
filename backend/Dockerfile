@@ -1,12 +1,16 @@
+# backend container. Build context: repository root (docker compose does this).
+# The image holds dependencies and a copy of the code; compose.yaml bind-mounts common/ and backend/ over
+# the copies for development, so code changes need no rebuild.
 FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app/common:/app/backend
 WORKDIR /app
-COPY backend/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt \
+COPY common/requirements.txt /tmp/common.txt
+COPY backend/requirements.txt /tmp/service.txt
+RUN pip install --no-cache-dir -r /tmp/common.txt -r /tmp/service.txt \
     && useradd --create-home --uid 10001 easyq \
-    && mkdir -p /app/var/objects \
-    && chown -R easyq:easyq /app
-COPY --chown=easyq:easyq backend/easyq /app/easyq
+    && mkdir -p /app/var/objects && chown -R easyq:easyq /app
+COPY --chown=easyq:easyq common /app/common
+COPY --chown=easyq:easyq backend /app/backend
 USER easyq
-ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
-CMD ["uvicorn", "easyq.backend_app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+CMD ["uvicorn", "--factory", "easyq_backend.main:create_app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--proxy-headers"]

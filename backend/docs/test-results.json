@@ -1,8 +1,8 @@
 {
-  "executed_at_utc": "2026-11-26T00:55:30.690633+00:00",
-  "duration_seconds": 121.351,
-  "total": 138,
-  "passed": 138,
+  "executed_at_utc": "2026-11-26T01:28:54.332747+00:00",
+  "duration_seconds": 123.126,
+  "total": 144,
+  "passed": 144,
   "failed": 0,
   "errors": 0,
   "skipped": 0,
@@ -43,6 +43,10 @@
     },
     {
       "test": "tests.test_api.APITests.test_csrf_rotation_invalidates_old_value",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_api.APITests.test_dev_seed_creates_login_ready_accounts_only_for_localhost",
       "status": "passed"
     },
     {
@@ -162,6 +166,10 @@
       "status": "passed"
     },
     {
+      "test": "tests.test_api.APITests.test_participation_carries_nickname_and_session_status",
+      "status": "passed"
+    },
+    {
       "test": "tests.test_api.APITests.test_password_reset_is_single_use_and_revokes_all_sessions",
       "status": "passed"
     },
@@ -231,6 +239,10 @@
     },
     {
       "test": "tests.test_api.APITests.test_successful_logins_do_not_consume_failed_login_quota",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_api.APITests.test_swagger_models_match_real_auth_and_entry_responses",
       "status": "passed"
     },
     {
@@ -319,6 +331,10 @@
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_csrf_rotation_invalidates_old_value",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_postgres.PostgreSQLTests.test_dev_seed_creates_login_ready_accounts_only_for_localhost",
       "status": "passed"
     },
     {
@@ -442,6 +458,10 @@
       "status": "passed"
     },
     {
+      "test": "tests.test_postgres.PostgreSQLTests.test_participation_carries_nickname_and_session_status",
+      "status": "passed"
+    },
+    {
       "test": "tests.test_postgres.PostgreSQLTests.test_password_reset_is_single_use_and_revokes_all_sessions",
       "status": "passed"
     },
@@ -511,6 +531,10 @@
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_successful_logins_do_not_consume_failed_login_quota",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_postgres.PostgreSQLTests.test_swagger_models_match_real_auth_and_entry_responses",
       "status": "passed"
     },
     {

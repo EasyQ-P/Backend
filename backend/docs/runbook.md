@@ -1,5 +1,9 @@
 # EasyQ v0.3 실행 안내
 
+## 0. 프론트 연동용 로컬 개발 서버
+
+DB · 메일 수신기 · 테스트 계정까지 한 번에 띄우는 구성은 `compose.dev.yaml`이며, 사용법은 `docs/frontend-dev.md`에 있다. 아래 1~6은 실제 배포 · 운영 DB 기준 절차다.
+
 ## 1. 사전 조건
 
 Python 3.12 이상, PostgreSQL 16 + pgvector, SMTP, 교안용 비공개 S3, AI 팀과 합의한 Gemini Embedding 2 모델과 768차원 배치 임베딩 API가 필요하다. Python 패키지는 `backend/requirements.txt`로 설치한다. 이 파일의 버전 범위는 현재 환경에서 다운로드·설치 검증하지 못했다.

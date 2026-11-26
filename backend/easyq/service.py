@@ -539,7 +539,13 @@ class Service:
         if not user_id or 'training_consent' in b:
             self.save_consent(tx, 'TRAINING', self.entrance_consent(b.get('training_consent', False), 'TRAINING'), user=user_id, participant=None if user_id else pid, sid=sid)
         headers = {}
-        data = {'participant_id': pid, 'session_id': sid, 'kind': 'MEMBER' if user_id else 'GUEST', 'expires_at': self.clock() + timedelta(hours=24)}
+        # 7.3.1 Participation: nickname = guest nickname, or the member's display_name; session_status DRAFT/LIVE.
+        if user_id:
+            shown = tx.one('SELECT display_name FROM users WHERE user_id=%s', (user_id,))['display_name']
+        else:
+            shown = existing['nickname'] if existing and existing.get('nickname') else nickname
+        data = {'participant_id': pid, 'session_id': sid, 'kind': 'MEMBER' if user_id else 'GUEST', 'nickname': shown,
+                'session_status': s['status'], 'expires_at': self.clock() + timedelta(hours=24)}
         if not user_id:
             # Participant must commit before auth can verify it in a separate transaction.
             # execute() invokes the exchange after the participant transaction commits.

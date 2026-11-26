@@ -222,7 +222,7 @@ class Mailer:
             raise APIError(503, 'SMTP_NOT_CONFIGURED')
         config = ConnectionConfig(MAIL_USERNAME=s.smtp_user, MAIL_PASSWORD=s.smtp_password,
             MAIL_FROM=s.smtp_from, MAIL_PORT=s.smtp_port, MAIL_SERVER=s.smtp_host,
-            MAIL_STARTTLS=s.smtp_starttls, MAIL_SSL_TLS=not s.smtp_starttls,
+            MAIL_STARTTLS=s.smtp_starttls, MAIL_SSL_TLS=s.smtp_ssl,   # Gmail 587: STARTTLS; local Mailpit: neither
             USE_CREDENTIALS=bool(s.smtp_user), VALIDATE_CERTS=True)
         message = MessageSchema(subject=subject, recipients=[address], body=body, subtype=MessageType.plain)
         asyncio.run(FastMail(config).send_message(message))

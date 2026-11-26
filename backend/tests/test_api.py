@@ -1077,6 +1077,48 @@ class APITests(unittest.TestCase):
             tx.execute("UPDATE documents SET status='DELETING'")
         self.drain()
         self.assertEqual(self.row('SELECT status FROM documents')['status'], 'DELETING')
+    # ---------------------------------------------- frontend integration ----
+    def test_participation_carries_nickname_and_session_status(self):
+        s, _ = self.lecture()
+        visitor = Client(HTTPApplication(self.service, 'backend'))
+        data = visitor.call('POST', '/api/v1/participations', {'join_code': s['join_code'], 'nickname': '청중1', 'service_consent': True})[1]['data']
+        self.assertEqual((data['kind'], data['nickname'], data['session_status']), ('GUEST', '청중1', 'DRAFT'))
+        member = self.audience(s)
+        again = member.call('POST', '/api/v1/participations', {'join_code': s['join_code']})[1]['data']
+        self.assertEqual((again['kind'], again['nickname']), ('MEMBER', '조현준'))
+
+    @unittest.skipUnless(__import__('importlib').util.find_spec('pydantic'), 'pydantic not installed')
+    def test_swagger_models_match_real_auth_and_entry_responses(self):
+        from easyq import schemas
+        self.assertTrue({'User', 'AuthData', 'JoinPreview', 'Participation', 'ErrorResponse'} <= set(schemas.components()))
+        body = {'email': 'swagger@example.com', 'password': 'easyq2026', 'display_name': '문서',
+                'consents': {'SERVICE': {'policy_version': 'service-v1', 'granted': True}}}
+        schemas.SignupRequest.model_validate(body)
+        status, payload, _ = self.auth.call('POST', '/api/v1/users', body)
+        schemas.SignupData.model_validate(payload['data'])
+        schemas.ErrorResponse.model_validate(self.auth.call('POST', '/api/v1/users', body)[1])
+        s, _ = self.lecture()
+        login = self.auth.call('POST', '/api/v1/auth/sessions', {'email': 'member@example.com', 'password': 'easyq2026'})[1]
+        schemas.AuthData.model_validate(login['data'])
+        schemas.User.model_validate(self.auth.call('GET', '/api/v1/me')[1]['data'])
+        visitor = Client(HTTPApplication(self.service, 'backend'))
+        schemas.JoinPreview.model_validate(visitor.call('GET', '/api/v1/join-codes/' + s['join_code'])[1]['data'])
+        request = {'join_code': s['join_code'], 'nickname': '청중', 'service_consent': True}
+        schemas.ParticipationRequest.model_validate(request)
+        schemas.Participation.model_validate(visitor.call('POST', '/api/v1/participations', request)[1]['data'])
+        schemas.CsrfData.model_validate(self.auth.call('POST', '/api/v1/auth/csrf-tokens', {}, headers={'x-easyq-client': 'web'})[1]['data'])
+
+    def test_dev_seed_creates_login_ready_accounts_only_for_localhost(self):
+        from easyq.devseed import check_development, create_member
+        create_member(self.db, 'member@easyq.local', '테스트회원', 'easyq2026', clock=lambda: self.moment)
+        status, payload, _ = self.auth.call('POST', '/api/v1/auth/sessions', {'email': 'member@easyq.local', 'password': 'easyq2026'})
+        self.assertEqual((status, payload['data']['user']['status'], payload['data']['user']['consents']['SERVICE']['granted']), (201, 'ACTIVE', True))
+        with self.assertRaises(APIError):
+            create_member(self.db, 'member@easyq.local', '테스트회원', 'easyq2026', clock=lambda: self.moment)
+        check_development({'EASYQ_DEV_SEED': '1', 'PUBLIC_ORIGIN': 'http://localhost:3000'})
+        for env in ({'PUBLIC_ORIGIN': 'http://localhost:3000'}, {'EASYQ_DEV_SEED': '1', 'PUBLIC_ORIGIN': 'https://easyq.example.com'}):
+            with self.assertRaises(SystemExit):
+                check_development(env)
 
 if __name__ == '__main__':
     unittest.main()

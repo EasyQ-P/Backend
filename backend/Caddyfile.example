@@ -1,19 +1,20 @@
-# Merge these matchers into the existing frontend Caddy configuration.
-# The frontend container must join easyq-network. Internal/health/docs are private.
+# Merge these matchers into the existing Caddy configuration (design 6.1.1 · 7.1.4).
+# Caddy, frontend, auth and backend must share easyq-network. Internal/health/docs are private.
 easyq.example.com {
+    # 7.1.4: POST /users, /auth/*, exactly GET·PATCH /me → auth (/me/consents, /me/questions stay on backend).
     @auth path /api/v1/users /api/v1/auth/* /api/v1/me
     handle @auth {
         reverse_proxy auth:8000
     }
+    # REST and the WebSocket (/api/v1/ws/sessions/{sid}); reverse_proxy upgrades WebSocket automatically.
     handle /api/v1/* {
         reverse_proxy backend:8000
     }
     handle /internal/* {
         respond 404
     }
+    # Next.js server (design 6.1.1 "frontend: Next.js 화면 서버"): dynamic routes such as /lectures/[id].
     handle {
-        root * /srv/frontend
-        try_files {path} /index.html
-        file_server
+        reverse_proxy frontend:3000
     }
 }

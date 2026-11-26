@@ -28,6 +28,7 @@ class Settings:
     smtp_password: str = ""
     smtp_from: str = ""
     smtp_starttls: bool = True
+    smtp_ssl: bool = False
     upload_limit: int = 50 * 1024 * 1024
     expanded_limit: int = 200 * 1024 * 1024
     embedding_max_batch_cost_usd: str = ""
@@ -62,6 +63,7 @@ class Settings:
             smtp_host=os.environ.get("SMTP_HOST", ""), smtp_port=int(os.environ.get("SMTP_PORT", "587")),
             smtp_user=os.environ.get("SMTP_USER", ""), smtp_password=os.environ.get("SMTP_PASSWORD", ""),
             smtp_from=os.environ.get("SMTP_FROM", ""), smtp_starttls=os.environ.get("SMTP_STARTTLS", "true").lower() == "true",
+            smtp_ssl=os.environ.get("SMTP_SSL_TLS", "false").lower() == "true",
             embedding_max_batch_cost_usd=os.environ.get('EMBEDDING_MAX_BATCH_COST_USD', ''),
             embedding_price_version=os.environ.get('EMBEDDING_PRICE_VERSION', ''),
             reference_version=os.environ.get('EVAL_REFERENCE_VERSION', ''),

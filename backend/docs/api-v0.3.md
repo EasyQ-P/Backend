@@ -5,6 +5,8 @@
 
 ## 공통 동작
 
+- 요청 · 응답 필드는 Swagger(`/docs`)에 인증 API-01~09와 입장 API-18 · 19부터 Pydantic 모델로 들어 있다(`easyq/schemas.py`). 로컬 개발 서버는 `frontend-dev.md` 참고.
+
 - 모든 공개 경로 앞에 `/api/v1`이 붙는다.
 - 성공 응답은 `{request_id, data}`, 실패 응답은 `{request_id, error:{code, message, details, retryable}}`이다. 204는 본문이 없다.
 - 변경 요청(GET 외)은 모두 `Origin`을 검사한다. 로그인이 필요한 변경 요청은 `X-CSRF-Token`도 검사한다.
@@ -37,7 +39,7 @@
 | API-16 | PATCH `/sessions/{sid}` | 강연자 | 정보 수정(DRAFT에서만), 시작(LIVE, 12시간 자동 종료 예약), 종료(ENDED, 90일 보관 기한 설정), STT 상태 변경(동의 확인 후 CONNECTING). `If-Match` 필요 | 200 · 409 `VERSION_CONFLICT` / `SESSION_STATE_CONFLICT` · 403 `CONSENT_REQUIRED` |
 | API-17 | POST `/sessions/{sid}/join-links` | 강연자 | 입장 QR 재발급. 바로 전 코드는 410 처리. `If-Match` 필요 | 201 · 409 |
 | API-18 | GET `/join-codes/{code}` | 누구나 | 입장 전 강연 미리보기, 정원 여부 | 200 · 404 `JOIN_CODE_INVALID` · 410 `JOIN_CODE_REVOKED` · 409 `SESSION_ENDED` · 429 |
-| API-19 | POST `/participations` | 회원 · 게스트 | 청중 입장(정원 50명). 게스트는 INT-01로 강연 전용 세션 발급. 다시 입장하면 200 | 201/200 · 409 `SESSION_FULL` · 403 `CONSENT_REQUIRED` · 503 `AUTH_SERVICE_UNAVAILABLE` |
+| API-19 | POST `/participations` | 회원 · 게스트 | 청중 입장(정원 50명). 게스트는 INT-01로 강연 전용 세션 발급. 다시 입장하면 200. 응답 Participation: participant_id · session_id · kind · nickname(회원은 display_name) · session_status · expires_at · csrf_token(게스트 첫 입장) | 201/200 · 409 `SESSION_FULL` · 403 `CONSENT_REQUIRED` · 503 `AUTH_SERVICE_UNAVAILABLE` |
 | API-20 | POST `/sessions/{sid}/consents` | 강연자 · 참가자 | 강연 단위 SERVICE · TRAINING · STT(강연자만) 동의 변경. 철회하면 참가 폐기 · 강연 종료 · STT 중지 | 201 |
 | API-21 | POST `/sessions/{sid}/documents` | 강연자 | 교안 업로드(PDF/PPTX, 50MiB, `Idempotency-Key` 필수). INGEST 작업 등록 | 202 + Location · 413 `FILE_TOO_LARGE` · 415 `FILE_TYPE_UNSUPPORTED` · 409 `IDEMPOTENCY_CONFLICT` |
 | API-22 | GET `/sessions/{sid}/documents` | 강연자 | 교안별 처리 상태 · 단계 · 쪽수 · 조각 수 · 오류 코드 | 200(목록) |
@@ -104,4 +106,4 @@
 - **STT 실제 연결:** google-genai Live API 어댑터는 실제 제공자로 검증하지 않았다(테스트는 가짜 STT). `STT_MODEL` · `STT_API_KEY`가 없으면 `audio.start`가 `STT_UNAVAILABLE`.
 - **활성 스트림 관리**는 backend 프로세스 1개를 전제로 한다(compose 구성과 같음).
 - **기준 설계:** 백엔드 v1.2 반영 설계서와 `easyq_schema_v1.2.sql`. v1.3 작업본은 팀 회의에서 반려되어 따르지 않는다.
-- **검증 범위:** 오프라인 테스트(SQLite 하네스) 68개와 실제 PostgreSQL 16 + pgvector 테스트 70개로 확인했다. FastAPI 기동 · 외부 연동(SMTP · S3 · Gemini)은 아직 검증하지 않았다.
+- **검증 범위:** 오프라인 테스트(SQLite 하네스) 71개와 실제 PostgreSQL 16 + pgvector 테스트 73개로 확인했다. FastAPI 기동 · 외부 연동(SMTP · S3 · Gemini)은 아직 검증하지 않았다.

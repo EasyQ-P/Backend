@@ -79,6 +79,10 @@ docs/                    백엔드 v1.2 반영 설계서(HWPX), 팀 공유 보�
 CLAUDE.md, CONTRIBUTING.md, .github/
 ```
 
+## 프론트 연동용 로컬 개발 서버
+
+`cd backend; docker compose -f compose.dev.yaml up --build` — PostgreSQL · Mailpit · auth(:8001) · backend(:8000) · worker와 테스트 계정(member@easyq.local / admin@easyq.local)을 함께 띄운다. 프론트 프록시 설정과 계정은 [backend/docs/frontend-dev.md](backend/docs/frontend-dev.md).
+
 ## 실행 · 시험 (프로토타입)
 
 ```powershell
@@ -87,4 +91,4 @@ python -m pip install -r requirements.txt
 python -m unittest tests.test_api
 ```
 
-오프라인 테스트는 SQLite 하네스와 가짜 외부 연동으로 실제 서비스 · worker 코드를 실행합니다(현재 68개 통과, PostgreSQL 테스트 70개 통과). 실제 PostgreSQL 테스트는 `EASYQ_TEST_DATABASE_URL`을 설정해야 실행됩니다. 자세한 절차는 [backend/docs/runbook.md](backend/docs/runbook.md), 구현 설명은 [backend/docs/implementation-v0.3.md](backend/docs/implementation-v0.3.md)를 참고하세요.
+오프라인 테스트는 SQLite 하네스와 가짜 외부 연동으로 실제 서비스 · worker 코드를 실행합니다(현재 71개 통과, PostgreSQL 테스트 73개 통과). 실제 PostgreSQL 테스트는 `EASYQ_TEST_DATABASE_URL`을 설정해야 실행됩니다. 자세한 절차는 [backend/docs/runbook.md](backend/docs/runbook.md), 구현 설명은 [backend/docs/implementation-v0.3.md](backend/docs/implementation-v0.3.md)를 참고하세요.

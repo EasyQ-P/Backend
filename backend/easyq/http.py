@@ -154,6 +154,8 @@ def create_app(mode='backend', service=None, stt_factory=None):
             await LiveConnection(service, hub, stt_factory, StarletteSocket(websocket), sid, headers,
                                  dict(websocket.cookies)).run()
 
+    from . import schemas
+
     def openapi():
         paths = {}
         for target, method, path, aid, summary in ROUTES:
@@ -170,8 +172,15 @@ def create_app(mode='backend', service=None, stt_factory=None):
             if method in ('POST', 'PATCH', 'PUT') and not path.endswith('/retries'):
                 media = 'multipart/form-data' if path.endswith('/documents') else 'application/json'
                 operation['requestBody'] = {'content': {media: {'schema': {'type': 'object'}}}}
+            documented = schemas.operation(aid, method)
+            if documented:
+                parameters[:] = [p for p in parameters if p['in'] == 'path'] + documented.pop('parameters')
+                operation.update(documented)
             paths.setdefault('/api/v1' + path, {})[method.lower()] = operation
-        return {'openapi': '3.1.0', 'info': {'title': app.title, 'version': '0.3.0'}, 'paths': paths}
+        return {'openapi': '3.1.0', 'info': {'title': app.title, 'version': '0.3.0',
+                'description': '요청 · 응답 필드는 인증(API-01~09) · 입장(API-18, 19)부터 문서화. 나머지는 backend/docs/api-v0.3.md 참고.'},
+                'paths': paths, 'components': {'schemas': schemas.components(), 'securitySchemes': {
+                    'cookieAuth': {'type': 'apiKey', 'in': 'cookie', 'name': 'easyq_session'}}}}
 
     app.openapi = openapi
     app.mount('/', HTTPApplication(service, mode))

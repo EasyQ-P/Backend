@@ -1,0 +1,2 @@
+# backend container: real-time STT relay (Gemini Live, 6.2.5).
+google-genai>=1.0,<2

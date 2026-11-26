@@ -1,0 +1,23 @@
+# Local test Caddy (design 6.1.1 · 7.1.4). Plain HTTP; TLS is production only.
+{
+    auto_https off
+}
+:80 {
+    # 7.1.4: POST /users, /auth/*, exactly /me → auth. /me/consents, /me/questions stay on backend.
+    @auth path /api/v1/users /api/v1/auth/* /api/v1/me
+    handle @auth {
+        reverse_proxy auth:8000
+    }
+    # REST + WebSocket (/api/v1/ws/sessions/{sid}); upgraded automatically.
+    handle /api/v1/* {
+        reverse_proxy backend:8000
+    }
+    # Never proxied (7.3.11).
+    handle /internal/* {
+        respond 404
+    }
+    # Next.js dev server runs on the Docker host (frontend repo, `npm run dev` on :3000).
+    handle {
+        reverse_proxy host.docker.internal:3000
+    }
+}

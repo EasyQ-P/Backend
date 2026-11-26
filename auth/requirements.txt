@@ -1,0 +1,1 @@
+# auth container: nothing beyond common/requirements.txt (password hashing uses hashlib.scrypt).

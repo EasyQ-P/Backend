@@ -131,8 +131,8 @@ TRAINING 철회는 즉시 유효 동의에 반영하고 CLEANUP job을 만든다
 2. 사용자 파일명을 저장 경로로 사용하지 않는다. 원본은 `{session_id}/{document_id}` 키로 S3에 저장한다. DB 저장 실패 시 새 객체 삭제를 시도한다. 보상 삭제까지 실패한 객체는 버킷 lifecycle/운영 정리 대상이다.
 3. documents와 INGEST job은 같은 트랜잭션이다. 같은 주체·강연·Idempotency-Key와 파일 지문은 기존 작업을 반환하고 다른 파일이면 409다. 202는 완료가 아니라 접수다.
 4. worker가 jobs를 `FOR UPDATE SKIP LOCKED`로 점유하고 5분 lease와 고유 lease_token을 발급한다. 30초마다 연장하며 결과는 현재 lease_token이 일치할 때만 저장한다.
-5. PDF는 pypdf, PPTX는 presentation 관계 순서를 따라 슬라이드 텍스트를 추출한다. 빈 스캔 PDF는 OCR 결과를 꾸미지 않고 DOCUMENT_NO_TEXT로 실패한다. 암호화·손상 파일도 안전한 오류 코드로 끝난다.
-6. 페이지 번호를 유지해 문장·단어 경계를 우선하는 최대 800자, 100자 겹침 청크를 만든다. 이 규칙은 설계서의 미지정 세부값을 구현에서 고정한 것이며 retrieval_config_version에 포함한다.
+5. PDF는 PyMuPDF 글 블록(`page.get_text("blocks", sort=True)`의 글 블록), PPTX는 presentation 관계 순서를 따라 슬라이드별 문단 목록을 추출한다(쪽마다 글상자 목록). 빈 스캔 PDF는 OCR 결과를 꾸미지 않고 DOCUMENT_NO_TEXT로 실패한다. 암호화·손상 파일도 안전한 오류 코드로 끝난다.
+6. 청킹은 AI 레포 `retrieval` 패키지의 `chunk_slides(pages, bge_token_spans())`를 부른다(PR #10, slides-v4 규칙: 글상자 정리 · 1쪽 1조각 · 400토큰 초과 시 문단→문장→토큰 분할 · 단어 경계 50토큰 겹침 · 내용 적은 쪽 제외). MIT OCW 전용 패턴은 넘기지 않는다. 패키지는 태그가 아직 없어 PR #10 병합 커밋(af39668)으로 고정했다.
 7. Kiwi 명사·영어·숫자·용언 토큰을 정규화하고 PostgreSQL `to_tsvector('simple', ...)`로 색인한다. 임베딩은 설정된 Gemini 모델에서 받아 정확히 768차원·유한값·0이 아닌 벡터인지 검사한다. 설정 누락이나 잘못된 응답으로 READY를 만들지 않는다.
 8. embedding·search_vector·retrieval_config_version·indexed_at과 READY를 저장한다. source_key의 UNIQUE와 UPSERT가 재실행 중복을 막는다. pgvector HNSW와 GIN 인덱스는 제공된 SQL을 그대로 사용한다.
 9. API-22·41로 결과를 조회하고 document.updated를 ws_events에 저장한다. v0.3은 이벤트 생산까지 구현하며 WebSocket 소비·실시간 UI는 이후 버전에 연결한다. 전문용어 추출·사전 API도 v0.4 범위이므로 현재 단계는 INDEXING에서 끝난다.
@@ -193,4 +193,4 @@ API-10 계정 수정, API-14 내 강연 목록, API-23 교안 수동 재시도, 
 | 작업 무한 재점유 | worker `claim` | worker가 3번 죽은 작업은 FAILED로 끝낸다 |
 | eval_detection | worker | `check_status` PENDING/DONE, `eval_slide_version`(8.2.6) |
 
-설계와 다르거나 설계에 없는 부분: 용어 추출 방법(설계 미정, 팀이 Kiwi 규칙으로 결정), 발화 시각은 강연 시작 기준 ms(설계 미정), `audio.stop` 뒤 `stt_status=PAUSED` · 연결 끊김 뒤 `DEGRADED`(설계는 상태값만 정의), 직접 보내는 WebSocket 메시지(`transcript.final`, `audio.*`)는 event_id가 없다. 청킹은 AI 레포 태그가 나올 때까지 800자를 유지한다.
+설계와 다르거나 설계에 없는 부분: 용어 추출 방법(설계 미정, 팀이 Kiwi 규칙으로 결정), 발화 시각은 강연 시작 기준 ms(설계 미정), `audio.stop` 뒤 `stt_status=PAUSED` · 연결 끊김 뒤 `DEGRADED`(설계는 상태값만 정의), 직접 보내는 WebSocket 메시지(`transcript.final`, `audio.*`)는 event_id가 없다. 청킹은 AI 레포 `retrieval`(PR #10, 커밋 af39668 고정)의 `chunk_slides`를 쓴다. 키워드 색인 · 발화 30초 청킹 · 겹침 계산은 아직 이 레포의 구현이다.

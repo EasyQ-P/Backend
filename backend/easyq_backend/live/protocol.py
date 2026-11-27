@@ -13,7 +13,10 @@ CLOSE_TIMEOUT = 10                       # never let a stalled STT provider bloc
 NOTICE_SECONDS = 1.0                     # at most one "frames dropped" notice per second
 EVENT_LOOKBACK = 500                     # event ids re-read behind the newest one (late commits)
 HOST_ONLY = {'document.updated', 'stt.status', 'transcript.final'}
-EVERYONE = {'session.updated'}
+EVERYONE = {'session.updated', 'public_question.updated'}
+ASKER_ONLY = {'question.progress', 'answer.delta', 'answer.discarded'}          # routed by ws_events.question_id
+ASKER_AND_HOST = {'question.updated', 'answer.completed', 'answer.retracted'}
+MEMBERS_AND_HOST = {'summary.updated'}
 run_sync = asyncio.to_thread             # tests may swap in an inline runner
 
 

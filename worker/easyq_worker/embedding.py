@@ -11,11 +11,18 @@ class GeminiEmbedder:
         self.settings = settings
 
     def embed(self, texts):
+        return self._embed(texts, 'RETRIEVAL_DOCUMENT')
+
+    def embed_query(self, texts):
+        """Question vectors for the hybrid search (6.1.5) use the query task type."""
+        return self._embed(texts, 'RETRIEVAL_QUERY')
+
+    def _embed(self, texts, task_type):
         s = self.settings
         if not s.embedding_url or not s.embedding_key or not s.embedding_model:
             raise APIError(503, 'EMBEDDING_NOT_CONFIGURED')
         body = {'requests': [{'model': s.embedding_model, 'content': {'parts': [{'text': t}]},
-            'taskType': 'RETRIEVAL_DOCUMENT', 'outputDimensionality': 768} for t in texts]}
+            'taskType': task_type, 'outputDimensionality': 768} for t in texts]}
         request = urllib.request.Request(s.embedding_url, data=dumps(body).encode(),
             headers={'Content-Type': 'application/json', 'x-goog-api-key': s.embedding_key}, method='POST')
         try:

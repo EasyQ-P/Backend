@@ -23,7 +23,7 @@ from easyq_common.db import Tx
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = ROOT / 'DB 스키마파일' / 'easyq_schema_v1.2.sql'
+SCHEMA = ROOT / 'DB 스키마파일' / 'easyq_schema_v1.4.sql'
 
 
 
@@ -39,6 +39,8 @@ class SQLiteTx(Tx):
         return self.connection.execute(sql, args)
 
     def one(self, sql, args=()):
+        if "nextval('ws_events_event_id_seq')" in sql:   # no sequences in SQLite: next free number in the same lock
+            return {'event_id': self.execute('SELECT coalesce(max(event_id),0)+1 AS n FROM ws_events').fetchone()['n']}
         row = self.execute(sql, args).fetchone()
         return dict(row) if row else None
 
@@ -73,7 +75,7 @@ class SQLiteDatabase:
         CREATE VIEW auth_session_view AS SELECT a.auth_session_id,a.token_hash,a.expires_at,a.revoked_at,
           a.user_id,a.participant_id,u.status AS user_status,u.role AS user_role,
           (u.email_verified_at IS NOT NULL) AS email_verified,p.status AS guest_status,
-          p.session_id AS guest_session_id,a.csrf_token_hash
+          p.session_id AS guest_session_id,a.csrf_token_hash,a.created_at AS session_created_at
         FROM auth_sessions a LEFT JOIN users u ON u.user_id=a.user_id
         LEFT JOIN participants p ON p.participant_id=a.participant_id;
         """)
@@ -135,10 +137,16 @@ class Client:
             except StopIteration:
                 pass
         status = events[0]['status']
-        rh = {k.decode(): v.decode() for k, v in events[0]['headers']}
-        if 'set-cookie' in rh:
+        rh, set_cookies = {}, []
+        for k, v in events[0]['headers']:
+            if k.decode() == 'set-cookie':
+                set_cookies.append(v.decode())
+            rh[k.decode()] = v.decode()
+        if set_cookies:
+            rh['set-cookie'] = ', '.join(set_cookies)
+        for value in set_cookies:
             cookie = SimpleCookie()
-            cookie.load(rh['set-cookie'])
+            cookie.load(value)
             self.cookies.update({k: v.value for k, v in cookie.items()})
         payload = json.loads(events[1]['body']) if events[1]['body'] else None
         if payload and 'data' in payload and isinstance(payload['data'], dict) and 'csrf_token' in payload['data']:

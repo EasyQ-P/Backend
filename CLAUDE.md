@@ -11,9 +11,10 @@ EasyQ: 강연 중 청중 질문에 교안 · 발화 근거로 AI가 답하고, �
 ## 기준 문서
 
 - 원본: `설계서/(CodingAnt팀)설계서_v1.0(엄윤종,심주혜,신재우,조현준,최의찬).hwp`
-- 백엔드 v1.2 반영본: `docs/CodingAnt팀_설계서_v1.0_백엔드v1.2반영.hwpx` (읽을 때는 압축을 풀어 `Contents/section0.xml`의 `<hp:t>` 텍스트를 뽑는다)
-- DB 스키마: `DB 스키마파일/easyq_schema_v1.2.sql` (내용은 원본 그대로, PostgreSQL 적용을 위해 UNIQUE · 인덱스 블록만 FK 앞으로 옮김)
-- **설계 v1.3 작업본은 2026-11-25 팀 회의에서 반려됐다.** v1.2 반영본을 따른다. 반려본은 로컬 `docs/archive/v1.3-반려/`에만 있고 레포에는 없다.
+- **현재 기준: 백엔드 v1.4 작업본** `설계서/CodingAnt팀_설계서_v1.0_백엔드v1.4작업본.hwpx` (2026-11-27부터. 사본 · 검토 결과 · 팀 요청 문서는 `docs/설계서-v1.4-2026-11-27-1/`. 읽을 때는 압축을 풀어 `Contents/section0.xml`의 `<hp:t>` 텍스트를 뽑는다)
+- DB 스키마: `DB 스키마파일/easyq_schema_v1.4.sql`(인증 뷰 포함), 실행 계정 권한: `migrations/002_runtime_grants.sql`(v1.4 권한표 그대로). 코드는 각 컨테이너 DB 계정에 허락된 SQL만 쓴다(PostgreSQL 시험 `EASYQ_TEST_ROLES=1`로 확인).
+- 이전 기준: v1.2 반영본 `docs/CodingAnt팀_설계서_v1.0_백엔드v1.2반영.hwpx`. 설계 v1.3 작업본은 2026-11-25 팀 회의에서 반려됐다(로컬 `docs/archive/v1.3-반려/`에만 있음).
+- v1.4 검토에서 남은 설계 공백은 `docs/설계서-v1.4-2026-11-27-1/검토결과_v1.4_2026-11-27.md`. 구현 중 공백을 메운 선택은 `docs/service/`의 구현 문서에 적는다.
 - **AI팀 협업 규칙: `docs/EasyQ_AI팀_협업규칙.md`** — 교안 추출 · 정리 · 청킹(400토큰), 발화 30초, retrieval 패키지 · 학습서버 연동 경계. 교안 처리 · 발화 색인 · 검색 · 판정 · 학습서버 작업 전에 먼저 읽는다.
 - 참고: `docs/EasyQ_팀공유_보류사항.md`, `docs/EasyQ_통합검토_유스케이스_API.md`, `docs/EasyQ_Mermaid_원본.md`
 
@@ -44,18 +45,23 @@ PostgreSQL 16 + pgvector(RDS) · S3 · kiwipiepy · PyMuPDF · python-pptx · go
 ```
 compose.yaml              로컬 개발: 이미지에는 라이브러리만, 코드는 컨테이너마다 바인드 마운트(자동 재시작)
 common/easyq_common/      세 컨테이너 공용: core.py(ServiceCore: 실행 · 세션 확인 · CSRF · 동의 · 이벤트 · 작업 · 요청 한도 ·
-                          강연 접근 · 강연 종료), contracts, security, config, db, http(ASGI 전송 · OpenAPI), schemas(Swagger),
-                          storage(S3 · 로컬), auth_client(INT-01~03 호출)
+                          강연 접근 · 강연 종료 · 중복 요청 키), contracts, security, config, db, http(ASGI 전송 · OpenAPI),
+                          schemas(Swagger), storage(S3 · 로컬), auth_client(INT-01~03 호출), trainer(학습서버 7.4 고정 어댑터 ·
+                          현재 서빙 설정), candidates(라벨 후보 생성 · 재확인, backend · worker 공용)
 auth/                     인증 컨테이너(내부 8000, 개발 :8001) — Dockerfile, requirements.txt
-  easyq_auth/             main(앱), accounts(가입 · 인증 · 로그인 · 재설정), sessions(세션 · auth 경로 · 내부 API),
+  easyq_auth/             main(앱), accounts(가입 · 인증 · 로그인 · 재설정 · API-10), sessions(세션 · auth 경로 · 내부 API),
                           admin(ADMIN 생성 명령), devseed(개발 테스트 계정)
 backend/                  backend 컨테이너(내부 8000) — Dockerfile, requirements.txt
-  easyq_backend/          main(앱 · WebSocket), routes, lectures, participation, consents, documents, stt(Gemini Live),
-                          live/(protocol · events · audio · connection: 7.3.10 WebSocket)
+  easyq_backend/          main(앱 · WebSocket · Swagger 목록), router(영역별 ROUTES 표 분배), routes(v0.3 경로), lectures,
+                          participation, consents, documents, questions(API-12 · 26~36 · 38), reports(API-37 · 39),
+                          deletion(API-24 · 40), notices(API-42~44 · 49~52), admin(API-45~48 · 64 · 65),
+                          training(API-53~63), stt(Gemini Live), live/(protocol · events · audio · connection: 7.3.10)
 worker/                   worker 컨테이너(수신 포트 없음) — Dockerfile, requirements.txt
-  easyq_worker/           main(루프), runner(점유 · lease · 재시도 · 유지보수), worker(조립), ingest, transcript, mail,
-                          cleanup, retrieval, terms, budget, embedding
-migrations/               001 인증 뷰, 002 실행 계정 권한(예시)
+  easyq_worker/           main(루프), runner(점유 · lease · 재시도 · 유지보수, 작업별 JOB_HANDLERS 분배), worker(조립),
+                          ingest, transcript, qa(검색 · 판정 · 답변 · 인용 검증), finalize(AUTO_END · FINALIZE · SUMMARY),
+                          purge(삭제 요청 · 보관 기간 파기), cleanup(일일 정리 · TRAINING 철회), sync(DATASET · TRAIN ·
+                          DEPLOY · SYNC), mail, llm(Claude), judge_model(판정 추론 · keepalive), retrieval, terms, budget, embedding
+migrations/               002_runtime_grants.sql(v1.4 실행 계정 권한. 인증 뷰는 스키마 파일에 포함)
 dev/                      db-init(개발 계정), caddy(개발 Caddyfile), trainer-mock(학습서버 목업)
 deploy/                   Caddyfile.example(운영)
 tests/ · scripts/         SQLite 하네스 · PostgreSQL 시험, run_tests.py
@@ -112,7 +118,7 @@ docs/service/             API 정리, 구현 설명, 실행 안내, 프론트 �
 ### DB (8.2)
 - 식별자는 서버 발급 UUID, 시각은 TIMESTAMPTZ, 상태값은 CHECK 제약.
 - 강연 소속 행은 항상 `session_id` 조건으로 접근하고, `(session_id, 참조 ID)` 복합 FK를 기본으로 한다. 예외는 8.2.35 목록에 있는 것만.
-- 스키마 변경은 Alembic 마이그레이션으로만, `easyq_schema_v1.2.sql`과 어긋나면 먼저 알린다.
+- 스키마 변경은 Alembic 마이그레이션으로만, `easyq_schema_v1.4.sql`과 어긋나면 먼저 알린다.
 
 ### 로그 · 오류 (8.3 · 8.4)
 - UTF-8 JSON Lines, 공통 필드(`timestamp, level, service, event, request_id, trace_id, code, message, meta` …). 파일은 종류 · 날짜 · 인스턴스별.

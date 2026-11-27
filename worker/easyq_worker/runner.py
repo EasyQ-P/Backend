@@ -13,17 +13,33 @@ class WorkerBase:
 
     MAX_ATTEMPTS = 3
 
+    # Job mixins add {job_type: method_name} here (JOB_HANDLERS = {...}); the method takes the claimed job row and
+    # runs its own transactions (self.active / self.finish with the lease token). Collected over the MRO.
+    JOB_HANDLERS = {}
+
+    @classmethod
+    def handlers(cls):
+        table = {}
+        for klass in reversed(cls.__mro__):
+            table.update(klass.__dict__.get('JOB_HANDLERS', {}))
+        return table
+
+    @classmethod
+    def job_types(cls):
+        return tuple(dict.fromkeys(cls.TYPES + tuple(cls.handlers())))
+
     # Failures caused by the original file or a finished lecture are not retried.
     PERMANENT = ('DOCUMENT_INVALID', 'DOCUMENT_NO_TEXT', 'SESSION_STATE_CONFLICT', 'RESOURCE_NOT_FOUND')
 
     def __init__(self, service, embedder, mailer, tokenizer=None):
         self.service, self.db, self.settings = service, service.db, service.settings
         self.embedder, self.mailer, self.tokenizer = embedder, mailer, tokenizer
+        self.token_spans = None  # slide chunk token counter; loaded on first INGEST (tests inject a stub)
 
     @staticmethod
     def error_code(job_type, internal):
         """Persisted error_code must be an 8.4.2 code (jobs.error_code is shown by API-22 · API-41)."""
-        if internal in ('BUDGET_EXCEEDED', 'SESSION_STATE_CONFLICT', 'RESOURCE_NOT_FOUND', 'MERGE_RECONCILIATION_REQUIRED'):
+        if internal in ('BUDGET_EXCEEDED', 'SESSION_STATE_CONFLICT', 'RESOURCE_NOT_FOUND'):
             return internal
         if job_type == 'INGEST':
             return 'DOCUMENT_PARSE_FAILED' if internal in ('DOCUMENT_INVALID', 'DOCUMENT_NO_TEXT') else 'INDEX_BUILD_FAILED'
@@ -33,6 +49,8 @@ class WorkerBase:
             return 'EMAIL_DELIVERY_FAILED'
         if job_type == 'AUTH_REVOKE':
             return 'AUTH_SERVICE_UNAVAILABLE'
+        if job_type in ('PURGE', 'CLEANUP'):
+            return 'DELETION_FAILED'   # 8.4.2: access stays blocked, retried
         return 'SERVICE_UNAVAILABLE'
 
     def log_job_failure(self, job, internal, code, final, held, exc):
@@ -59,14 +77,15 @@ class WorkerBase:
 
     def claim(self):
         moment = self.service.clock()
-        marks = ','.join('%s' for _ in self.TYPES)
+        types = self.job_types()
+        marks = ','.join('%s' for _ in types)
         while True:
             with self.db.transaction() as tx:
                 # Utterance indexing goes before document processing (6.1.2: 발화 색인이 교안 처리보다 우선).
                 row = tx.one(f"""SELECT * FROM jobs WHERE job_type IN ({marks}) AND
                     ((status='QUEUED' AND available_at<=%s) OR (status='RUNNING' AND lease_until<%s))
-                    ORDER BY CASE WHEN job_type='TRANSCRIPT_INDEX' THEN 0 ELSE 1 END,available_at,created_at,job_id
-                    LIMIT 1 FOR UPDATE SKIP LOCKED""", (*self.TYPES, moment, moment))
+                    ORDER BY CASE WHEN job_type IN ('QA','TRANSCRIPT_INDEX') THEN 0 ELSE 1 END,available_at,created_at,job_id
+                    LIMIT 1 FOR UPDATE SKIP LOCKED""", (*types, moment, moment))
                 if not row:
                     return None
                 if row['status'] == 'RUNNING' and row['attempts'] >= self.MAX_ATTEMPTS:
@@ -123,7 +142,10 @@ class WorkerBase:
         heartbeat.start()
         try:
             kind = job['job_type']
-            if kind == 'INGEST':
+            handler = self.handlers().get(kind)
+            if handler:
+                getattr(self, handler)(job)
+            elif kind == 'INGEST':
                 self.ingest(job)
             elif kind == 'TRANSCRIPT_INDEX':
                 self.transcript_index(job)
@@ -157,7 +179,7 @@ class WorkerBase:
                     except APIError:
                         return True
                     permanent = internal in self.PERMANENT
-                    held = internal in ('BUDGET_EXCEEDED', 'MERGE_RECONCILIATION_REQUIRED')
+                    held = internal == 'BUDGET_EXCEEDED'
                     failed = permanent or job['attempts'] >= self.MAX_ATTEMPTS
                     code = self.error_code(job['job_type'], internal)
                     tx.execute("""UPDATE jobs SET status=%s,error_code=%s,available_at=%s,lease_until=NULL,finished_at=%s
@@ -172,16 +194,16 @@ class WorkerBase:
         return True
 
     def maintenance(self):
-        """Only unauthenticated signup credentials expire in v0.3; preserve member records."""
+        """About once a minute: enqueue the daily PURGE/CLEANUP (cleanup.enqueue_daily_jobs, idempotent per day; CLEANUP
+        removes unverified accounts, expired auth records, rate counters and delivered ws_events), keep the hourly
+        training-server SYNC scheduled, and release budget-HELD jobs."""
+        if hasattr(self, 'enqueue_daily_jobs'):
+            self.enqueue_daily_jobs()
+        if hasattr(self, 'ensure_periodic_sync'):
+            self.ensure_periodic_sync()   # hourly SYNC with the training server (8.2.25); SYNC jobs chain themselves
         with self.db.transaction() as tx:
-            self.service.rate(tx, 'maintenance', 'worker', 1000)
-            pending = tx.all("SELECT user_id FROM users WHERE status='PENDING_VERIFICATION' AND created_at<%s", (self.service.clock() - timedelta(hours=24),))
-            for user in pending:
-                tx.execute("DELETE FROM jobs WHERE requested_by=%s AND job_type IN ('EMAIL_VERIFICATION','PASSWORD_RESET')", (user['user_id'],))
-                tx.execute("DELETE FROM users WHERE user_id=%s AND status='PENDING_VERIFICATION' AND created_at<%s", (user['user_id'], self.service.clock() - timedelta(hours=24)))
             for table in ('email_verifications', 'password_resets'):
                 tx.execute(f'UPDATE {table} SET delivery_ciphertext=NULL WHERE expires_at<%s', (self.service.clock(),))
-            tx.execute('DELETE FROM auth_rate_limits WHERE expires_at<%s', (self.service.clock() - timedelta(days=1),))
             setting = tx.one("SELECT * FROM app_settings WHERE setting_key='MONTHLY_API_BUDGET'")
             held = tx.all("SELECT * FROM jobs WHERE status='HELD' AND error_code='BUDGET_EXCEEDED' FOR UPDATE SKIP LOCKED")
             for job in held:

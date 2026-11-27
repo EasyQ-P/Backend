@@ -20,7 +20,7 @@ docker compose down -v         # DB까지 지우고 처음부터
 | Mailpit | http://localhost:8025 | 가입 인증 코드 · 재설정 메일(실제로 발송되지 않음) |
 | PostgreSQL | localhost:15432 | DB `easyq`, 소유자 `easyq_owner` / `easyq_owner_dev` |
 
-- 처음 뜰 때 v1.2 스키마 · 인증 뷰 · 실행 계정(auth · backend · worker) · 권한을 자동으로 만든다. 처음 띄우다 실패한 적이 있으면 `docker compose down -v`부터 실행한다(반쯤 만든 DB는 초기화를 건너뛴다).
+- 처음 뜰 때 v1.4 스키마(인증 뷰 포함) · 실행 계정(auth · backend · worker) · 권한을 자동으로 만든다. v1.2 스키마로 만든 DB가 남아 있거나 처음 띄우다 실패한 적이 있으면 `docker compose down -v`부터 실행한다(기존 DB는 초기화를 건너뛴다).
 - 포트가 이미 쓰이고 있으면 `.env`에 `HTTP_PORT` · `BACKEND_PORT` · `AUTH_PORT` · `DB_PORT`를 바꿔 넣는다. `HTTP_PORT`를 바꾸면 `PUBLIC_ORIGIN=http://localhost:<포트>`도 같이 바꾼다.
 - 교안 임베딩 · 음성 STT는 키가 있어야 동작한다(없으면 `INDEX_BUILD_FAILED` · `STT_UNAVAILABLE`). 레포 루트 `.env`에 `EMBEDDING_URL` · `EMBEDDING_API_KEY` · `EMBEDDING_MODEL` · `STT_MODEL` · `STT_API_KEY`를 넣는다.
 

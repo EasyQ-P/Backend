@@ -5,6 +5,7 @@ import asyncio
 from easyq_common.contracts import APIError, uuid_value
 from easyq_common.http import build_app
 
+from . import admin, deletion, notices, questions, reports, training
 from .live import EventHub, LiveConnection, StarletteSocket
 
 ROUTES = [
@@ -23,6 +24,9 @@ ROUTES = [
     ('PUT', '/sessions/{sid}/terms', 'API-25', '전문용어 사전 저장'),
     ('GET', '/jobs/{job_id}', 'API-41', '작업 상태'),
 ]
+# Domain modules list their own routes (OPENAPI) next to the handlers; Swagger shows them in API number order.
+ROUTES += questions.OPENAPI + reports.OPENAPI + deletion.OPENAPI + notices.OPENAPI + admin.OPENAPI + training.OPENAPI
+ROUTES.sort(key=lambda route: int(route[2].split('-')[1]))
 
 
 def create_app(service=None, stt_factory=None):

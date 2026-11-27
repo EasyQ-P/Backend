@@ -1,6 +1,5 @@
 """Entry (API-18 · 19): join-code lookup and rate limit, member/guest participation."""
 from datetime import timedelta
-import hmac
 from uuid import UUID
 
 from easyq_common.contracts import (APIError, Result, dt, fields,
@@ -65,9 +64,9 @@ class ParticipationMixin:
             marker = req.cookies.get('easyq_join_retry', '')
             if key:
                 retry_pid = self.guest_retry_id(sid, uuid_value(key))
-            elif '.' in marker:
-                candidate, signature = marker.split('.', 1)
-                if hmac.compare_digest(signature, credential_hash(self.settings.hmac_key, 'guest-retry', sid, candidate)):
+            elif marker:
+                candidate = self.join_retry_participant(marker, sid)
+                if candidate:
                     retry_pid = uuid_value(candidate)
         if retry_pid:
             tx.lock('guest:' + retry_pid)
@@ -102,8 +101,9 @@ class ParticipationMixin:
             tx.execute("UPDATE participants SET status='ACTIVE',archived=true WHERE participant_id=%s", (pid,))
         else:
             pid = retry_pid or uid()
-            tx.execute("""INSERT INTO participants(participant_id,session_id,user_id,kind,nickname,archived)
-                VALUES(%s,%s,%s,%s,%s,%s)""", (pid, sid, user_id, 'MEMBER' if user_id else 'GUEST', nickname, bool(user_id)))
+            # joined_at from the service clock: the guest auth period (joined_at + 24 h) and the retry cookie use it.
+            tx.execute("""INSERT INTO participants(participant_id,session_id,user_id,kind,nickname,archived,joined_at)
+                VALUES(%s,%s,%s,%s,%s,%s,%s)""", (pid, sid, user_id, 'MEMBER' if user_id else 'GUEST', nickname, bool(user_id), self.clock()))
         if not user_id:
             self.save_consent(tx, 'SERVICE', self.entrance_consent(b['service_consent'], 'SERVICE'), participant=pid, sid=sid)
         if not user_id or 'training_consent' in b:
@@ -120,6 +120,8 @@ class ParticipationMixin:
             # Participant must commit before auth can verify it in a separate transaction.
             # execute() invokes the exchange after the participant transaction commits.
             data['_guest_exchange'] = True
+            joined = existing['joined_at'] if existing else self.clock()
+            data['_retry_expires'] = data['expires_at'] = dt(joined) + timedelta(hours=24)
         if not existing:
             self.event(tx, 'session.updated', {'participant_count': self.participant_count(tx, sid)}, sid)
         return Result(200 if existing else 201, data, headers)

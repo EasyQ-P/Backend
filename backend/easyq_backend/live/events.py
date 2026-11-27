@@ -31,7 +31,10 @@ class EventHub:
                                                           (max(0, self.last_event_id - self.lookback),))}
                 return []
             floor = max(0, self.last_event_id - self.lookback)
-            rows = tx.all('SELECT * FROM ws_events WHERE event_id>%s ORDER BY event_id LIMIT 2000', (floor,))
+            # asker_participant_id routes question/answer events to the asker only (7.3.10 질문자 채널).
+            rows = tx.all('''SELECT e.*, q.participant_id AS asker_participant_id FROM ws_events e
+                LEFT JOIN questions q ON q.session_id=e.session_id AND q.question_id=e.question_id
+                WHERE e.event_id>%s ORDER BY e.event_id LIMIT 2000''', (floor,))
         fresh = [r for r in rows if r['event_id'] not in self.seen]
         for r in fresh:
             self.seen.add(r['event_id'])

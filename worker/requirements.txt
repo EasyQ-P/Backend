@@ -1,4 +1,9 @@
 # worker container: PDF text, Korean morphology, SMTP mail.
-pypdf>=5,<7
+# PDF text blocks per page (design 10.1 PyMuPDF; retrieval chunk_slides input).
+PyMuPDF>=1.24,<2
+# Shared retrieval package (6.1.5), AI repo PR #10 (slides-v4 chunking). Pin to a tag once the AI repo publishes one.
+retrieval[keyword,tokenizer] @ https://github.com/EasyQ-P/AI/archive/af39668fd3dfc952d3785c14b59ce065a293b7d5.zip#subdirectory=retrieval
 kiwipiepy>=0.20,<1
 fastapi-mail>=1.4,<2
+# Claude Sonnet: QA answers, LLM_ONLY judgment, summary notes (llm.AnthropicLLM, imported lazily).
+anthropic>=2.0,<3

@@ -2,7 +2,6 @@
 Upload validation (API-21) lives in easyq_backend.documents."""
 from io import BytesIO
 import math
-import re
 import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
@@ -14,13 +13,15 @@ from easyq_common.contracts import APIError
 
 
 def extract_pages(filename, data):
+    """Return one list of text boxes (paragraphs) per page: the input shape of retrieval.chunk_slides
+    (AI repo PR #10, slides-v4). PDF: PyMuPDF text blocks in reading order. PPTX: paragraphs per slide."""
     if filename.lower().endswith('.pdf'):
-        from pypdf import PdfReader
+        import pymupdf
         try:
-            reader = PdfReader(BytesIO(data), strict=True)
-            if reader.is_encrypted:
-                raise ValueError('Encrypted PDF')
-            pages = [page.extract_text() or '' for page in reader.pages]
+            with pymupdf.open(stream=data, filetype='pdf') as document:
+                if document.needs_pass or document.is_encrypted:
+                    raise ValueError('Encrypted PDF')
+                pages = [[b[4] for b in page.get_text('blocks', sort=True) if b[6] == 0] for page in document]
         except Exception:
             raise APIError(422, 'DOCUMENT_INVALID') from None
     else:
@@ -39,36 +40,31 @@ def extract_pages(filename, data):
                             raise ValueError('Invalid relationship')
                         target = target.lstrip('/') if target.startswith('/') else 'ppt/' + target
                         root = ET.fromstring(z.read(target))
-                        pages.append('\n'.join(' '.join(t.text or '' for t in p.iter() if t.tag.endswith('}t')) for p in root.iter() if p.tag.endswith('}p')))
+                        # One text box per paragraph; runs inside a paragraph are joined without spaces.
+                        paragraphs = [''.join(t.text or '' for t in p.iter() if t.tag.endswith('}t')) for p in root.iter() if p.tag.endswith('}p')]
+                        pages.append([p for p in paragraphs if p.strip()])
         except (KeyError, ValueError, ET.ParseError, zipfile.BadZipFile):
             raise APIError(422, 'DOCUMENT_INVALID') from None
-    if not any(p.strip() for p in pages):
+    if not any(block.strip() for page in pages for block in page):
         raise APIError(422, 'DOCUMENT_NO_TEXT')
     return pages
 
 
-def chunks(pages, size=800, overlap=100):
-    if not 0 <= overlap < size:
-        raise ValueError('Invalid chunk configuration')
-    result = []
-    for page_no, page in enumerate(pages, 1):
-        normalized = re.sub(r'\s+', ' ', unicodedata.normalize('NFKC', page)).strip()
-        start, index = 0, 0
-        while start < len(normalized):
-            end = min(start + size, len(normalized))
-            if end < len(normalized):
-                # Prefer sentence/word boundaries in the final quarter of a chunk.
-                candidates = [m.end() for m in re.finditer(r'[.!?。！？](?:\s|$)|\s', normalized[start:end])]
-                cut = next((n for n in reversed(candidates) if n >= size * .75), None)
-                if cut:
-                    end = start + cut
-            part = normalized[start:end].strip()
-            result.append({'page_no': page_no, 'ordinal': index, 'content': part})
-            if end >= len(normalized):
-                break
-            start = max(start + 1, end - overlap)
-            index += 1
-    return result
+def page_text(page):
+    """Plain text of one page (term extraction and other callers that need a string)."""
+    return '\n'.join(page)
+
+
+def slide_token_spans(tokenizer):
+    """bge-reranker-v2-m3 token offsets for chunk_slides. Downloads tokenizer.json on first use unless a local path is set."""
+    from retrieval.chunking import bge_token_spans
+    return bge_token_spans(tokenizer)
+
+
+def chunks(pages, token_spans):
+    """Slide chunks by the shared retrieval rule (rc-v1 = slides-v4). MIT OCW strip/drop patterns are training-data only."""
+    from retrieval.chunking import chunk_slides
+    return [{'page_no': c.page_no, 'ordinal': c.part - 1, 'content': c.text} for c in chunk_slides(pages, token_spans)]
 
 
 def check_vectors(values, count):
@@ -80,8 +76,11 @@ def check_vectors(values, count):
     return values
 
 
-def keywords(value, kiwi):
-    return ' '.join(t.form.lower() for t in kiwi.tokenize(value) if t.tag.startswith(('N', 'SL', 'SN', 'VV', 'VA')))
+def keywords(value):
+    """Keyword tokens by the shared rule (rc-v1 tokenize_keywords), space-joined for to_tsvector('simple').
+    Search scores them with BM25 over the same lecture's READY chunks (6.1.5); positions keep term frequency."""
+    from retrieval.keyword import tokenize_keywords
+    return ' '.join(tokenize_keywords(value))
 
 
 def normalized(value):

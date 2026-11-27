@@ -4,10 +4,16 @@ import re
 from easyq_common.contracts import (APIError, Result, fields,
                                     obj, uuid_value)
 
+from .router import dispatch
+
 
 class RoutesMixin:
     def backend_route(self, tx, req, path):
         method, b = req.method, req.body
+        # Table routes from the domain mixins (router.py) first; the v0.3 routes below stay as they were.
+        result = dispatch(self, tx, req, path)
+        if result is not None:
+            return result
         if path.startswith('/join-codes/') and method == 'GET':
             s = self.join_lookup(tx, path.split('/')[-1], req.ip)
             p = self.entry_principal(tx, req)
@@ -48,7 +54,7 @@ class RoutesMixin:
                 return self.upload(tx, req, p, sid)
             if tail == '/documents' and method == 'GET':
                 self.lecture(tx, sid, p, True)
-                rows = tx.all('SELECT document_id,file_name,status,stage,page_count,chunk_count,error_code FROM documents WHERE session_id=%s ORDER BY created_at,document_id', (sid,))
+                rows = tx.all("SELECT document_id,file_name,status,stage,page_count,chunk_count,error_code FROM documents WHERE session_id=%s AND status<>'DELETING' ORDER BY created_at,document_id", (sid,))
                 for r in rows:
                     r['retryable'] = self.document_retryable(r)
                 return Result(200, {'items': rows, 'next_cursor': None, 'total_count': len(rows)})
@@ -62,7 +68,10 @@ class RoutesMixin:
         if path.startswith('/jobs/') and method == 'GET':
             jid = uuid_value(path.split('/')[-1])
             job = tx.one('SELECT * FROM jobs WHERE job_id=%s', (jid,))
-            if not job or not p['user_id'] or str(job['requested_by']) != str(p['user_id']):
+            # Members see jobs they requested; guests see their own jobs (e.g. their QA job) by participant_id.
+            mine = (p['user_id'] and str(job['requested_by']) == str(p['user_id'])) if job else False
+            mine = mine or bool(job and not p['user_id'] and job['participant_id'] and str(job['participant_id']) == str(p['participant_id']))
+            if not job or not mine:
                 raise APIError(404, 'RESOURCE_NOT_FOUND')
             # 7.3.1 Job. result never carries document text or credentials (worker stores counts only).
             return Result(200, {k: job[k] for k in ['job_id', 'job_type', 'status', 'attempts', 'error_code', 'finished_at']}

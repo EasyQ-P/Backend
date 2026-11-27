@@ -67,6 +67,8 @@ class SessionsMixin:
             tx.execute('UPDATE auth_sessions SET csrf_token_hash=%s WHERE auth_session_id=%s', (digest(csrf), p['auth_session_id']))
             self.event(tx, 'auth.csrf_rotated',{'auth_session_id': str(p['auth_session_id'])})
             return Result(200, {'csrf_token': csrf})
+        if path == '/me' and method == 'PATCH':
+            return self.change_account(tx, req, p)
         if path == '/me' and method == 'GET':
             user_id = self.member(p)
             return Result(200, self.user_public(tx, tx.one('SELECT * FROM users WHERE user_id=%s', (user_id,))))

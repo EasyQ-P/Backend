@@ -36,6 +36,18 @@ x-env: &env
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
   STT_MODEL: ${STT_MODEL:-}
   STT_API_KEY: ${STT_API_KEY:-}
+  # Claude (QA answers, LLM_ONLY judgment, summary notes). Without a key questions escalate with PROVIDER_FAILURE;
+  # without prices + price version LLM calls are held while the budget hard cap is on (same rule as embeddings).
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  LLM_MODEL: ${LLM_MODEL:-claude-sonnet-5-5}
+  LLM_PROMPT_VERSION: ${LLM_PROMPT_VERSION:-llm-only-v1}
+  LLM_ONLY_THRESHOLD: ${LLM_ONLY_THRESHOLD:-70}
+  LLM_INPUT_USD_PER_MTOK: ${LLM_INPUT_USD_PER_MTOK:-}
+  LLM_OUTPUT_USD_PER_MTOK: ${LLM_OUTPUT_USD_PER_MTOK:-}
+  LLM_PRICE_VERSION: ${LLM_PRICE_VERSION:-}
+  EMBEDDING_MAX_BATCH_COST_USD: ${EMBEDDING_MAX_BATCH_COST_USD:-}
+  EMBEDDING_PRICE_VERSION: ${EMBEDDING_PRICE_VERSION:-}
+  CHUNK_TOKENIZER: ${CHUNK_TOKENIZER:-BAAI/bge-reranker-v2-m3}
   TRAINING_API_BASE_URL: ${TRAINING_API_BASE_URL:-http://trainer-mock:9000/api/v1}
   TRAINING_API_KEY: ${TRAINING_API_KEY:-dev-only-trainer-key}
 
@@ -54,13 +66,13 @@ services:
     volumes:
       - dbdata:/var/lib/postgresql/data
       # Run once, in file-name order, on an empty volume (docker compose down -v to run them again).
-      - "./DB 스키마파일/easyq_schema_v1.2.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro"
-      - ./migrations/001_auth_session_view.sql:/docker-entrypoint-initdb.d/02_auth_session_view.sql:ro
-      - ./dev/db-init/03_dev_roles.sql:/docker-entrypoint-initdb.d/03_dev_roles.sql:ro
-      - ./migrations/002_runtime_grants.example.sql:/docker-entrypoint-initdb.d/04_runtime_grants.sql:ro
+      # v1.4: the schema file already contains auth_session_view (csrf_token_hash, session_created_at).
+      - "./DB 스키마파일/easyq_schema_v1.4.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro"
+      - ./dev/db-init/03_dev_roles.sql:/docker-entrypoint-initdb.d/02_dev_roles.sql:ro
+      - ./migrations/002_runtime_grants.sql:/docker-entrypoint-initdb.d/03_runtime_grants.sql:ro
     healthcheck:
       # Over TCP: the entrypoint's temporary init server listens only on the socket, so this passes only after
-      # every init script ran; the role check confirms 03/04 finished.
+      # every init script ran; the role check confirms 02/03 finished.
       test: ["CMD-SHELL", "PGPASSWORD=easyq_owner_dev psql -h 127.0.0.1 -U easyq_owner -d easyq -tAc \"SELECT 1 FROM pg_roles WHERE rolname='easyq_worker'\" | grep -q 1"]
       interval: 2s
       timeout: 3s
@@ -78,6 +90,11 @@ services:
     environment:
       <<: *env
       DATABASE_URL: postgresql://easyq_auth:easyq_auth_dev@db:5432/easyq
+      # Provider keys belong to backend/worker only (CLAUDE.md: X-API-Key is never given to auth).
+      TRAINING_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      EMBEDDING_API_KEY: ""
+      STT_API_KEY: ""
     volumes: [./common:/app/common, ./auth:/app/auth]
     ports: ["127.0.0.1:${AUTH_PORT:-8001}:8000"]
     depends_on: {db: {condition: service_healthy}}
@@ -103,7 +120,8 @@ services:
       <<: *env
       DATABASE_URL: postgresql://easyq_worker:easyq_worker_dev@db:5432/easyq
       INTERNAL_SERVICE_KEY: dev-only-worker-key-0123456789abcdefghijklm   # worker may only call INT-02
-    volumes: [./common:/app/common, ./worker:/app/worker, objects:/app/var/objects]
+    # hfcache keeps the chunk tokenizer (CHUNK_TOKENIZER, downloaded on the first INGEST) across restarts.
+    volumes: [./common:/app/common, ./worker:/app/worker, objects:/app/var/objects, hfcache:/home/easyq/.cache]
     depends_on: {db: {condition: service_healthy}, mailpit: {condition: service_started}}
 
   # One-off: test accounts member@easyq.local / easyq2026 and admin@easyq.local / admin2026 (kept if they exist).
@@ -115,6 +133,10 @@ services:
       <<: *env
       DATABASE_URL: postgresql://easyq_auth:easyq_auth_dev@db:5432/easyq
       EASYQ_DEV_SEED: "1"
+      TRAINING_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      EMBEDDING_API_KEY: ""
+      STT_API_KEY: ""
     volumes: [./common:/app/common, ./auth:/app/auth]
     depends_on: {db: {condition: service_healthy}}
     restart: "no"
@@ -141,3 +163,4 @@ services:
 volumes:
   dbdata:
   objects:
+  hfcache:

@@ -12,7 +12,8 @@ class LecturesMixin:
                 'version', 'started_at', 'ended_at', 'raw_data_expires_at', 'is_eval_lecture']
         data = {k: s[k] for k in keys}
         owner = p['user_id'] and str(p['user_id']) == str(s['host_user_id'])
-        data.update(my_role='HOST' if owner else 'AUDIENCE', participant_count=self.participant_count(tx, s['session_id']), capacity=50, has_summary=False)
+        data.update(my_role='HOST' if owner else 'AUDIENCE', participant_count=self.participant_count(tx, s['session_id']), capacity=50,
+                    has_summary=bool(tx.one("SELECT 1 AS x FROM summary_notes WHERE session_id=%s AND status='READY'", (s['session_id'],))))
         data['my_consents'] = {}
         participant = self.participant(tx, s['session_id'], p)
         for purpose in ('SERVICE', 'TRAINING', 'STT'):
@@ -107,7 +108,7 @@ class LecturesMixin:
         if not 1 <= limit <= 100:
             raise APIError(422, 'VALIDATION_ERROR')
         status = q.get('status')
-        if status is not None and (scope != 'hosted' or status not in ('DRAFT', 'LIVE', 'ENDED')):
+        if status is not None and (scope != 'hosted' or status not in ('DRAFT', 'LIVE', 'ENDED', 'PURGED')):
             raise APIError(422, 'VALIDATION_ERROR')
         search = text(q['q'], 50) if 'q' in q else None
         if search is not None and scope != 'joined':
@@ -121,7 +122,8 @@ class LecturesMixin:
                 raise APIError(422, 'VALIDATION_ERROR') from None
         # Newest first by scheduled time; (scheduled_at, session_id) keeps the cursor stable.
         if scope == 'hosted':
-            where, args = ['s.host_user_id=%s', 's.host_deleted_at IS NULL', "s.status IN ('DRAFT','LIVE','ENDED')"], [user_id]
+            # N1 (v1.4): past lectures are ENDED and PURGED; lectures the host deleted (API-40 SESSION) are left out.
+            where, args = ['s.host_user_id=%s', 's.host_deleted_at IS NULL', "s.status IN ('DRAFT','LIVE','ENDED','PURGED')"], [user_id]
             if status:
                 where.append('s.status=%s')
                 args.append(status)

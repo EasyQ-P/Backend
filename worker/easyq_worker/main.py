@@ -18,8 +18,9 @@ def main():
     while True:
         try:
             if time.monotonic() - last >= 60:
-                worker.maintenance()
                 last = time.monotonic()
+                worker.maintenance()
+                worker.keep_judge_model_warm()   # 6.4.14 judge-model lease, about once a minute
             if not worker.run_one():
                 time.sleep(1)
         except Exception:

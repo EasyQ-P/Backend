@@ -1,14 +1,118 @@
 {
-  "executed_at_utc": "2026-11-26T02:20:34.287913+00:00",
-  "duration_seconds": 126.893,
-  "total": 146,
-  "passed": 146,
+  "executed_at_utc": "2026-11-27T03:13:52.707641+00:00",
+  "duration_seconds": 238.157,
+  "total": 307,
+  "passed": 307,
   "failed": 0,
   "errors": 0,
   "skipped": 0,
   "offline_harness": "Actual ASGI decoder + SQL service; SQLite type/lock adaptations; fake external providers",
   "postgresql": "Enabled only with EASYQ_TEST_DATABASE_URL naming a dedicated *_test database",
   "cases": [
+    {
+      "test": "tests.test_account.AccountTests.test_display_name_change_returns_user",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_account.AccountTests.test_password_change_revokes_all_sessions_and_issues_new_cookie",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_account.AccountTests.test_validation_csrf_and_route",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_account.AccountTests.test_wrong_current_password_is_limited_per_account",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_account.PGAccountTests.test_display_name_change_returns_user",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_account.PGAccountTests.test_password_change_revokes_all_sessions_and_issues_new_cookie",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_account.PGAccountTests.test_validation_csrf_and_route",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_account.PGAccountTests.test_wrong_current_password_is_limited_per_account",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.AdminTests.test_admin_lecture_list_eval_mark_and_force_end",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.AdminTests.test_budget_settings_and_metrics",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.AdminTests.test_candidate_list_rechecks_consent_and_two_person_review",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.AdminTests.test_deploy_switch_rollback_and_conflicts",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.AdminTests.test_merge_sends_sanitized_pairs_and_cleans_up",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.AdminTests.test_serving_change_on_training_server_is_synced_and_audited",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.AdminTests.test_trainer_adapter_envelope_mapping_and_fixed_paths",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.AdminTests.test_training_flow_sync_and_stop",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.AdminTests.test_users_list_suspend_force_end_and_restore",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.PGAdminTests.test_admin_lecture_list_eval_mark_and_force_end",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.PGAdminTests.test_budget_settings_and_metrics",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.PGAdminTests.test_candidate_list_rechecks_consent_and_two_person_review",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.PGAdminTests.test_deploy_switch_rollback_and_conflicts",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.PGAdminTests.test_merge_sends_sanitized_pairs_and_cleans_up",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.PGAdminTests.test_serving_change_on_training_server_is_synced_and_audited",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.PGAdminTests.test_trainer_adapter_envelope_mapping_and_fixed_paths",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.PGAdminTests.test_training_flow_sync_and_stop",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_admin.PGAdminTests.test_users_list_suspend_force_end_and_restore",
+      "status": "passed"
+    },
     {
       "test": "tests.test_api.APITests.test_admin_is_created_only_by_server_command_and_logs_in_normally",
       "status": "passed"
@@ -94,6 +198,10 @@
       "status": "passed"
     },
     {
+      "test": "tests.test_api.APITests.test_failed_mail_job_is_logged_without_address_or_exception_text",
+      "status": "passed"
+    },
+    {
       "test": "tests.test_api.APITests.test_final_hwp_boolean_guest_consent_example",
       "status": "passed"
     },
@@ -131,6 +239,14 @@
     },
     {
       "test": "tests.test_api.APITests.test_join_link_rotation_revokes_immediate_previous_code",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_api.APITests.test_judge_model_keepalive_only_while_lectures_need_it",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_api.APITests.test_keyword_index_uses_rc_v1_tokens",
       "status": "passed"
     },
     {
@@ -198,6 +314,10 @@
       "status": "passed"
     },
     {
+      "test": "tests.test_api.APITests.test_repeated_signup_within_sixty_seconds_reports_existing_email",
+      "status": "passed"
+    },
+    {
       "test": "tests.test_api.APITests.test_resend_revokes_old_code_without_changing_password",
       "status": "passed"
     },
@@ -218,7 +338,15 @@
       "status": "passed"
     },
     {
+      "test": "tests.test_api.APITests.test_signup_rejects_special_use_domains_the_mailer_cannot_send_to",
+      "status": "passed"
+    },
+    {
       "test": "tests.test_api.APITests.test_signup_validation_and_origin",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_api.APITests.test_signup_without_service_consent_is_403",
       "status": "passed"
     },
     {
@@ -295,6 +423,142 @@
     },
     {
       "test": "tests.test_api.APITests.test_wrong_codes_commit_attempts_and_lock_after_five",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_account_withdrawal_deletes_personal_records_and_hosted_lectures",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_account_withdrawal_rules",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_archive_delete_requires_finished_lecture_and_keeps_record_for_host",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_daily_cleanup_removes_unverified_accounts_and_expired_records",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_daily_purge_destroys_raw_data_ninety_days_after_end",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_document_delete_purges_s3_chunks_and_keeps_citation_text",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_failed_s3_delete_keeps_access_blocked_and_daily_run_retries",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_host_delete_purges_raw_data_and_keeps_record_for_archive_member",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_live_lecture_accepts_only_failed_document_without_evidence",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_merging_candidate_makes_purge_wait_without_failing",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_question_delete_private_removes_and_public_unlinks",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_resend_leaves_old_mail_job_to_be_skipped_by_worker",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_session_delete_rules_and_draft_withdraws_waiting_participants",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.DeletionTests.test_training_withdrawal_cleanup_waits_for_merging_candidates",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_account_withdrawal_deletes_personal_records_and_hosted_lectures",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_account_withdrawal_rules",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_archive_delete_requires_finished_lecture_and_keeps_record_for_host",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_daily_cleanup_removes_unverified_accounts_and_expired_records",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_daily_purge_destroys_raw_data_ninety_days_after_end",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_document_delete_purges_s3_chunks_and_keeps_citation_text",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_failed_s3_delete_keeps_access_blocked_and_daily_run_retries",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_host_delete_purges_raw_data_and_keeps_record_for_archive_member",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_live_lecture_accepts_only_failed_document_without_evidence",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_merging_candidate_makes_purge_wait_without_failing",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_question_delete_private_removes_and_public_unlinks",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_resend_leaves_old_mail_job_to_be_skipped_by_worker",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_session_delete_rules_and_draft_withdraws_waiting_participants",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_deletion.PGDeletionTests.test_training_withdrawal_cleanup_waits_for_merging_candidates",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_notices.NoticesTests.test_guest_has_no_notice_or_inquiry_access",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_notices.NoticesTests.test_inquiries_own_list_admin_list_and_reply",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_notices.NoticesTests.test_notice_lifecycle_with_version_and_audit",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_notices.PGNoticesTests.test_guest_has_no_notice_or_inquiry_access",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_notices.PGNoticesTests.test_inquiries_own_list_admin_list_and_reply",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_notices.PGNoticesTests.test_notice_lifecycle_with_version_and_audit",
       "status": "passed"
     },
     {
@@ -386,6 +650,10 @@
       "status": "passed"
     },
     {
+      "test": "tests.test_postgres.PostgreSQLTests.test_failed_mail_job_is_logged_without_address_or_exception_text",
+      "status": "passed"
+    },
+    {
       "test": "tests.test_postgres.PostgreSQLTests.test_final_hwp_boolean_guest_consent_example",
       "status": "passed"
     },
@@ -423,6 +691,14 @@
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_join_link_rotation_revokes_immediate_previous_code",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_postgres.PostgreSQLTests.test_judge_model_keepalive_only_while_lectures_need_it",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_postgres.PostgreSQLTests.test_keyword_index_uses_rc_v1_tokens",
       "status": "passed"
     },
     {
@@ -494,6 +770,10 @@
       "status": "passed"
     },
     {
+      "test": "tests.test_postgres.PostgreSQLTests.test_repeated_signup_within_sixty_seconds_reports_existing_email",
+      "status": "passed"
+    },
+    {
       "test": "tests.test_postgres.PostgreSQLTests.test_resend_revokes_old_code_without_changing_password",
       "status": "passed"
     },
@@ -514,7 +794,15 @@
       "status": "passed"
     },
     {
+      "test": "tests.test_postgres.PostgreSQLTests.test_signup_rejects_special_use_domains_the_mailer_cannot_send_to",
+      "status": "passed"
+    },
+    {
       "test": "tests.test_postgres.PostgreSQLTests.test_signup_validation_and_origin",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_postgres.PostgreSQLTests.test_signup_without_service_consent_is_403",
       "status": "passed"
     },
     {
@@ -591,6 +879,362 @@
     },
     {
       "test": "tests.test_postgres.PostgreSQLTests.test_wrong_codes_commit_attempts_and_lock_after_five",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_admin_fixed_llm_only_skips_trainer_and_never_makes_auto_candidates",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_answer_is_limited_to_four_sentences",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_answer_without_valid_citation_is_discarded_and_escalated",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_answered_question_is_not_reprocessed",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_auto_end_handler_ends_and_finalizes",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_auto_escalation_creates_candidate_only_with_both_training_consents",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_budget_hard_cap_escalates_with_budget_exceeded",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_custom_answer_is_streamed_cited_and_confirmed",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_finalize_escalates_inflight_cancels_qa_and_cleans_guest_content",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_finalize_keeps_consented_guest_question_for_candidates",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_judge_timeout_falls_back_to_llm_only_for_that_question",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_model_not_loaded_611_also_falls_back",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_no_candidates_escalates_insufficient_evidence",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_pending_evaluation_check_defers_candidates_until_sweep",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_postgres_keyword_bm25_matches_shared_bm25",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_provider_failure_escalates_without_failing_the_job",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_retraction_and_rating_candidates_one_per_cited_chunk",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_retrieval_never_leaves_the_lecture",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_sanitize_masks_contact_details",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_second_stage_insufficient_discards_and_becomes_candidate",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_summary_budget_hold_shows_queued",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_summary_final_failure_marks_failed",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_summary_is_generated_once_with_verified_sources",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.PGQAWorkerTests.test_summary_skipped_under_thousand_characters",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_admin_fixed_llm_only_skips_trainer_and_never_makes_auto_candidates",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_answer_is_limited_to_four_sentences",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_answer_without_valid_citation_is_discarded_and_escalated",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_answered_question_is_not_reprocessed",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_auto_end_handler_ends_and_finalizes",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_auto_escalation_creates_candidate_only_with_both_training_consents",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_budget_hard_cap_escalates_with_budget_exceeded",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_custom_answer_is_streamed_cited_and_confirmed",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_finalize_escalates_inflight_cancels_qa_and_cleans_guest_content",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_finalize_keeps_consented_guest_question_for_candidates",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_judge_timeout_falls_back_to_llm_only_for_that_question",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_model_not_loaded_611_also_falls_back",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_no_candidates_escalates_insufficient_evidence",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_pending_evaluation_check_defers_candidates_until_sweep",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_provider_failure_escalates_without_failing_the_job",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_retraction_and_rating_candidates_one_per_cited_chunk",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_retrieval_never_leaves_the_lecture",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_sanitize_masks_contact_details",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_second_stage_insufficient_discards_and_becomes_candidate",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_summary_budget_hold_shows_queued",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_summary_final_failure_marks_failed",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_summary_is_generated_once_with_verified_sources",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_qa_worker.QAWorkerTests.test_summary_skipped_under_thousand_characters",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_citation_source_only_for_host_or_citing_asker",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_event_hub_routes_question_events_to_asker_and_host",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_guest_cannot_list_my_questions",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_host_completes_and_uncompletes_escalated_questions",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_my_questions_lists_member_records_across_lectures",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_no_candidate_without_both_training_consents_or_for_eval_lectures",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_notes_are_members_only_public_only_and_private_to_writer",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_private_questions_and_answers_are_hidden_from_others",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_public_list_sorts_by_votes_and_pages_with_cursor",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_rating_by_asker_only_and_one_candidate_whose_type_follows_the_rating",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_retraction_hides_answer_audits_and_makes_retracted_candidate",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_similar_search_returns_only_escalated_questions",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_submit_requires_participant_consent_and_live",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_submit_stores_question_job_and_event_in_one_step",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_summary_and_statistics_after_end",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.PGQuestionTests.test_votes_count_once_and_only_on_live_escalated_questions",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_citation_source_only_for_host_or_citing_asker",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_event_hub_routes_question_events_to_asker_and_host",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_guest_cannot_list_my_questions",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_host_completes_and_uncompletes_escalated_questions",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_my_questions_lists_member_records_across_lectures",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_no_candidate_without_both_training_consents_or_for_eval_lectures",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_notes_are_members_only_public_only_and_private_to_writer",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_private_questions_and_answers_are_hidden_from_others",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_public_list_sorts_by_votes_and_pages_with_cursor",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_rating_by_asker_only_and_one_candidate_whose_type_follows_the_rating",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_retraction_hides_answer_audits_and_makes_retracted_candidate",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_similar_search_returns_only_escalated_questions",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_submit_requires_participant_consent_and_live",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_submit_stores_question_job_and_event_in_one_step",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_summary_and_statistics_after_end",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_questions.QuestionTests.test_votes_count_once_and_only_on_live_escalated_questions",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_v14_entry.EntryV14Tests.test_capacity_skips_guests_whose_session_ended",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_v14_entry.EntryV14Tests.test_host_service_withdrawal_ends_live_lecture_without_if_match",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_v14_entry.EntryV14Tests.test_host_service_withdrawal_keeps_draft_and_blocks_start",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_v14_entry.EntryV14Tests.test_hosted_past_tab_accepts_purged",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_v14_entry.EntryV14Tests.test_retry_cookie_lasts_24_hours_and_finds_the_same_guest",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_v14_entry.PGEntryV14Tests.test_capacity_skips_guests_whose_session_ended",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_v14_entry.PGEntryV14Tests.test_host_service_withdrawal_ends_live_lecture_without_if_match",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_v14_entry.PGEntryV14Tests.test_host_service_withdrawal_keeps_draft_and_blocks_start",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_v14_entry.PGEntryV14Tests.test_hosted_past_tab_accepts_purged",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_v14_entry.PGEntryV14Tests.test_retry_cookie_lasts_24_hours_and_finds_the_same_guest",
       "status": "passed"
     }
   ]

@@ -127,8 +127,8 @@ AI팀(엄윤종 · 최의찬)에서 받은 개발 규칙과, AI 레포 · 학습
 
 | 위치 | 지금 | 바꿀 내용 |
 |---|---|---|
-| `retrieval.extract_pages` | pypdf `extract_text`, `strict=True` | PyMuPDF 글 블록 추출(1.2) |
-| `retrieval.chunks` | 800자 · 100자 겹침, 쪽마다 독립 | 400토큰 · 쪽 안에서만 50토큰 겹침(1.7) |
+| `retrieval.extract_pages` | ~~pypdf `extract_text`~~ → **반영(2026-11-26)**: PyMuPDF 글 블록 · PPTX 문단 목록 | PyMuPDF 글 블록 추출(1.2) |
+| `retrieval.chunks` | ~~800자 · 100자 겹침~~ → **반영(2026-11-26)**: AI 레포 `chunk_slides`(PR #10) 호출 | 400토큰 · 쪽 안에서만 50토큰 겹침(1.7) |
 | 정리 규칙 | 없음 | 저작권 줄 → 깨진 줄 → 내용 적은 쪽 판정(1.4~1.6) |
 | PPTX | 슬라이드 본문만 | 그대로 유지(노트 제외) |
 | `retrieval.py` 자체 | 이 레포에 직접 구현 | AI 레포 `retrieval` 패키지를 태그로 설치해 호출(4.1) |

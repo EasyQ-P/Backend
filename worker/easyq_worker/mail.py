@@ -29,11 +29,12 @@ class MailJob:
         table, idcol = ('password_resets', 'reset_id') if reset else ('email_verifications', 'verification_id')
         with self.db.transaction() as tx:
             self.active(tx, job)
-            r = tx.one(f'SELECT * FROM {table} WHERE {idcol}=%s FOR UPDATE', (job['target_id'],))
+            # Named columns only: easyq_worker may not read the verifier hashes (code_hash/token_hash) or password_hash.
+            r = tx.one(f'SELECT user_id,delivery_ciphertext,expires_at,consumed_at,revoked_at FROM {table} WHERE {idcol}=%s FOR UPDATE', (job['target_id'],))
             if not r or r['consumed_at'] or r['revoked_at'] or dt(r['expires_at']) <= self.service.clock() or not r['delivery_ciphertext']:
                 self.finish(tx, job, {'skipped': True})
                 return
-            user = tx.one('SELECT * FROM users WHERE user_id=%s', (r['user_id'],))
+            user = tx.one('SELECT email FROM users WHERE user_id=%s', (r['user_id'],))
             raw = decrypt(self.settings.encryption_key, r['delivery_ciphertext'])
             address = user['email']
         body = self.settings.origin + '/reset-password#token=' + raw if reset else 'EasyQ 가입 인증 코드: ' + raw

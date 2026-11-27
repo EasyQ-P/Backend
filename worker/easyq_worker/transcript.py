@@ -17,9 +17,6 @@ class TranscriptJob:
             if not chunk or chunk['index_status'] == 'READY':
                 self.finish(tx, job, {'skipped': True})
                 return
-        if self.tokenizer is None:
-            from kiwipiepy import Kiwi
-            self.tokenizer = Kiwi()
         usage_id = reserve(self.service, job)
         began = time.monotonic()
         try:
@@ -36,7 +33,7 @@ class TranscriptJob:
             moment = self.service.clock()
             tx.execute("""UPDATE knowledge_chunks SET embedding=%s::vector,search_vector=to_tsvector('simple',%s),
                 retrieval_config_version=%s,index_status='READY',indexed_at=%s WHERE session_id=%s AND chunk_id=%s""",
-                (dumps(vector), keywords(chunk['content'], self.tokenizer), self.settings.retrieval_version, moment,
+                (dumps(vector), keywords(chunk['content']), self.settings.retrieval_version, moment,
                  job['session_id'], job['target_id']))
             lag = max(0, int((moment - dt(chunk['captured_at'])).total_seconds() * 1000))
             self.service.event(tx, 'stt.status', {'status': lecture['stt_status'], 'indexed_until_ms': chunk['end_ms'],

@@ -4,6 +4,7 @@ The DSN must name a dedicated *_test database. Every run uses and removes its
 own random schema; the supplied SQL and migration are applied without rewriting.
 """
 from contextlib import contextmanager
+import contextvars
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -15,8 +16,31 @@ from . import test_api
 from .support import SCHEMA
 
 
-@unittest.skipUnless(os.environ.get('EASYQ_TEST_DATABASE_URL'), 'PostgreSQL DSN not configured')
-class PostgreSQLTests(test_api.APITests):
+PG_DSN = os.environ.get('EASYQ_TEST_DATABASE_URL')
+# EASYQ_TEST_ROLES=1: grant migrations/002_runtime_grants.sql in the test schema and run every auth/backend request and
+# worker job under its own least-privilege role (easyq_auth/easyq_backend/easyq_worker must exist in the cluster, e.g.
+# from dev/db-init/03_dev_roles.sql). Fixture SQL in tests stays on the owner connection.
+PG_ROLES = os.environ.get('EASYQ_TEST_ROLES') == '1'
+GRANTS = Path(__file__).resolve().parents[1] / 'migrations' / '002_runtime_grants.sql'
+CURRENT_ROLE = contextvars.ContextVar('easyq_test_role', default=None)
+
+
+def run_as(role, func):
+    def wrapper(*args, **kwargs):
+        token = CURRENT_ROLE.set(role)
+        try:
+            return func(*args, **kwargs)
+        finally:
+            CURRENT_ROLE.reset(token)
+    return wrapper
+
+
+class PostgresMixin:
+    """Put first in the bases of any APIBase suite to run it on PostgreSQL:
+        @unittest.skipUnless(PG_DSN, 'PostgreSQL DSN not configured')
+        class PGFooTests(PostgresMixin, FooTests): pass
+    """
+
     def setUp(self):
         import psycopg
         from psycopg import sql
@@ -34,9 +58,15 @@ class PostgreSQLTests(test_api.APITests):
         self.pg_admin.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(self.schema)))
         self.pg_admin.execute(sql.SQL('SET search_path TO {},public').format(sql.Identifier(self.schema)))
         self.pg_admin.execute(SCHEMA.read_text(encoding='utf-8'))
-        migration = Path(__file__).resolve().parents[1] / 'migrations/001_auth_session_view.sql'
-        self.pg_admin.execute(migration.read_text(encoding='utf-8'))
         schema = self.schema
+        if PG_ROLES:
+            self.pg_admin.execute(GRANTS.read_text(encoding='utf-8'))
+            self.pg_admin.execute(sql.SQL('GRANT USAGE ON SCHEMA {} TO easyq_auth, easyq_backend, easyq_worker').format(sql.Identifier(schema)))
+            execute = self.service.execute
+            self.service.execute = lambda req, mode='backend': run_as('easyq_' + mode, execute)(req, mode)
+            for name in ('run_one', 'maintenance', 'keep_judge_model_warm'):
+                if hasattr(self.worker, name):
+                    setattr(self.worker, name, run_as('easyq_worker', getattr(self.worker, name)))
 
         class PostgreSQLDatabase:
             @contextmanager
@@ -44,6 +74,8 @@ class PostgreSQLTests(test_api.APITests):
                 with psycopg.connect(dsn, row_factory=dict_row) as connection:
                     with connection.transaction():
                         connection.execute(sql.SQL('SET LOCAL search_path TO {},public').format(sql.Identifier(schema)))
+                        if CURRENT_ROLE.get():
+                            connection.execute(sql.SQL('SET LOCAL ROLE {}').format(sql.Identifier(CURRENT_ROLE.get())))
                         yield Tx(connection)
 
         self.db = PostgreSQLDatabase()
@@ -57,6 +89,10 @@ class PostgreSQLTests(test_api.APITests):
             self.pg_admin.close()
         self.tmp.cleanup()
 
+
+
+@unittest.skipUnless(PG_DSN, 'PostgreSQL DSN not configured')
+class PostgreSQLTests(PostgresMixin, test_api.APITests):
     def test_native_postgresql_indexes(self):
         with self.db.transaction() as tx:
             indexes = tx.all('SELECT indexdef FROM pg_indexes WHERE schemaname=%s', (self.schema,))

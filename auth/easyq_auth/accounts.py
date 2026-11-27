@@ -46,8 +46,8 @@ class AccountsMixin:
         table, idcol, hashcol, kind = ('password_resets', 'reset_id', 'token_hash', 'PASSWORD_RESET') if reset else ('email_verifications', 'verification_id', 'code_hash', 'EMAIL_VERIFICATION')
         current = self.clock()
         tx.execute(f"UPDATE {table} SET revoked_at=%s,delivery_ciphertext=NULL WHERE user_id=%s AND consumed_at IS NULL AND revoked_at IS NULL", (current, user['user_id']))
-        tx.execute("""UPDATE jobs SET status='CANCELLED',finished_at=%s WHERE requested_by=%s
-            AND job_type=%s AND status IN ('QUEUED','RUNNING')""", (current, user['user_id'], kind))
+        # easyq_auth may not UPDATE jobs (8.2.1 grants): earlier mail jobs stay queued and the worker skips them
+        # because their record is revoked above (MailJob checks consumed/revoked/expired before sending).
         rid = uid()
         raw = token() if reset else f'{secrets.randbelow(1000000):06d}'
         subject = 'reset' if reset else str(user['user_id'])
@@ -67,7 +67,7 @@ class AccountsMixin:
         service = consent(b['consents']['SERVICE'])
         training = consent(b['consents'].get('TRAINING', {'policy_version': 'training-v1', 'granted': False}))
         if not service['granted']:
-            raise APIError(422, 'CONSENT_REQUIRED')
+            raise APIError(403, 'CONSENT_REQUIRED')  # 8.4.2 (API-01 aligned, frontend confirmed)
         # IP limit first (an existing-address probe still counts), then the duplicate check, then the
         # per-address 60-second/hourly limit, so a repeated sign-up gets EMAIL_ALREADY_EXISTS, not RATE_LIMITED.
         self.mail_ip_rate(tx, req.ip)
@@ -151,3 +151,45 @@ class AccountsMixin:
         tx.execute('UPDATE password_resets SET consumed_at=%s,delivery_ciphertext=NULL WHERE reset_id=%s', (self.clock(), record['reset_id']))
         self.revoke(tx, user=str(user['user_id']))
         return Result(204)
+
+    # ---- API-10 표시명 · 비밀번호 변경 ---------------------------------------------------
+    PASSWORD_CHECK_LIMIT, PASSWORD_CHECK_WINDOW = 10, 900  # 7.1.2: current-password failures, 10 per account per 15 min
+
+    def change_account(self, tx, req, p):
+        """PATCH /me. A password change checks the current password (rate limited per account), revokes every
+        session of the account (session.revoked closes their WebSockets) and issues a new session cookie for this
+        browser. The body stays User (7.3.2); the new CSRF token is obtained with API-06 (the client's CSRF
+        403 → API-06 → retry-once path covers it)."""
+        user_id = self.member(p)
+        self.csrf(req, p)
+        b = req.body
+        fields(b, ['display_name', 'current_password', 'new_password'])
+        if 'display_name' not in b and 'new_password' not in b:
+            raise APIError(422, 'VALIDATION_ERROR')
+        if ('current_password' in b) != ('new_password' in b):
+            raise APIError(422, 'VALIDATION_ERROR', {'field': 'current_password'})
+        name = text(b['display_name'], 50) if 'display_name' in b else None
+        if 'new_password' in b:
+            if not valid_password(b['new_password']):
+                raise APIError(422, 'VALIDATION_ERROR', {'field': 'new_password'})
+            if not isinstance(b['current_password'], str) or not 1 <= len(b['current_password']) <= 128:
+                raise APIError(422, 'VALIDATION_ERROR', {'field': 'current_password'})
+        user = tx.one('SELECT * FROM users WHERE user_id=%s FOR UPDATE', (user_id,))
+        if not user or user['status'] != 'ACTIVE':
+            raise APIError(401, 'AUTH_REQUIRED')
+        moment, headers = self.clock(), {}
+        if 'new_password' in b:
+            self.rate(tx, 'password-check', user_id, self.PASSWORD_CHECK_LIMIT, self.PASSWORD_CHECK_WINDOW, count=False)
+            if not password_matches(b['current_password'], user['password_hash']):
+                self.rate(tx, 'password-check', user_id, self.PASSWORD_CHECK_LIMIT, self.PASSWORD_CHECK_WINDOW)
+                raise APIError(401, 'AUTH_INVALID_CREDENTIALS', commit=True)
+            tx.execute('UPDATE users SET password_hash=%s,updated_at=%s WHERE user_id=%s', (password_hash(b['new_password']), moment, user_id))
+            # Unused reset links must not undo the change.
+            tx.execute('UPDATE password_resets SET revoked_at=%s,delivery_ciphertext=NULL WHERE user_id=%s AND consumed_at IS NULL AND revoked_at IS NULL',
+                       (moment, user_id))
+            self.revoke(tx, user=user_id)
+            _, cookie = self.issue(tx, user=user_id)
+            headers['Set-Cookie'] = cookie
+        if name is not None:
+            tx.execute('UPDATE users SET display_name=%s,updated_at=%s WHERE user_id=%s', (name, moment, user_id))
+        return Result(200, self.user_public(tx, tx.one('SELECT * FROM users WHERE user_id=%s', (user_id,))), headers)

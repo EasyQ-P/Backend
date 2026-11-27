@@ -18,6 +18,12 @@ from easyq_worker.worker import Worker
 from .support import Client, Service, SQLiteDatabase, pdf, pptx
 
 
+def whitespace_spans(text):
+    """Offline stand-in for the bge-reranker token counter used by retrieval.chunk_slides."""
+    import re
+    return [(m.start(), m.end()) for m in re.finditer(r'\S+', text)]
+
+
 class Tokenizer:
     """Kiwi stand-in: whitespace tokens with positions; ASCII words are SL, a leading capital Korean-free
     word is still SL, '#'-prefixed words act as proper nouns (NNP), everything else NNG."""
@@ -153,7 +159,9 @@ def frame(stream_id, sequence):
     return FRAME_HEADER.pack(UUID(stream_id).bytes, sequence, sequence * 100) + bytes(2) * 1600
 
 
-class APITests(unittest.TestCase):
+class APIBase(unittest.TestCase):
+    """Fixtures shared by every HTTP suite (SQLite here; tests/test_postgres.PostgresMixin swaps in PostgreSQL)."""
+
     def setUp(self):
         from easyq_backend.live import LiveConnection
         LiveConnection.streams.clear()
@@ -169,6 +177,15 @@ class APITests(unittest.TestCase):
         self.api = Client(HTTPApplication(self.service, 'backend'))
         self.mailer = Mailer()
         self.worker = Worker(self.service, Embedder(), self.mailer, Tokenizer())
+        self.worker.token_spans = whitespace_spans
+        # retrieval.chunk_slides counts Korean content words with Kiwi; use the same offline stand-in.
+        from unittest.mock import patch
+        kiwi = patch('retrieval.chunking._kiwi', return_value=Tokenizer())
+        kiwi.start()
+        self.addCleanup(kiwi.stop)
+        keyword_kiwi = patch('retrieval.keyword._KIWI', Tokenizer())   # rc-v1 tokenize_keywords (6.1.5)
+        keyword_kiwi.start()
+        self.addCleanup(keyword_kiwi.stop)
 
     def tearDown(self):
         self.db.connection.close()
@@ -208,6 +225,8 @@ class APITests(unittest.TestCase):
         self.assertEqual(status, 201, payload)
         return payload['data'], headers['etag']
 
+
+class APITests(APIBase):
     def test_registration_is_atomic_and_stores_only_protected_credentials(self):
         user = self.register('MEMBER@EXAMPLE.COM')
         stored = self.row('SELECT * FROM users WHERE user_id=%s', (user,))
@@ -270,6 +289,50 @@ class APITests(unittest.TestCase):
         self.assertTrue(line['code'])
         self.assertNotIn('logged@example.com', stderr.getvalue())
 
+    def test_signup_without_service_consent_is_403(self):
+        # 8.4.2: CONSENT_REQUIRED is 403 (API-01 aligned; the frontend branches on error.code).
+        status, payload, _ = self.auth.call('POST', '/api/v1/users', {'email': 'c@example.com', 'password': 'easyq2026', 'display_name': 'C',
+            'consents': {'SERVICE': {'policy_version': 'v1', 'granted': False}}})
+        self.assertEqual((status, payload['error']['code']), (403, 'CONSENT_REQUIRED'))
+
+    def test_keyword_index_uses_rc_v1_tokens(self):
+        from easyq_worker.retrieval import keywords
+        # Fake Kiwi: ASCII words are SL (lower-cased by tokenize_keywords), other words NNG.
+        self.assertEqual(keywords('Hash 충돌은 처리'), 'hash 충돌은 처리')
+
+    def test_judge_model_keepalive_only_while_lectures_need_it(self):
+        # 6.4.14 lease: called while a lecture is LIVE or a DRAFT lecture has audience; never logs the API key.
+        import io
+        from contextlib import redirect_stderr
+        from dataclasses import replace as dc_replace
+        calls = []
+
+        class Trainer:
+            fail = False
+            def keepalive(self):
+                calls.append(1)
+                if self.fail:
+                    raise OSError('tunnel down for dev-only-trainer-key')
+                return {'loaded': False, 'loading': True}
+
+        self.worker.settings = dc_replace(self.worker.settings, training_api_base_url='http://trainer:9000/api/v1', training_api_key='dev-only-trainer-key')
+        self.worker.trainer = Trainer()
+        self.assertFalse(self.worker.keep_judge_model_warm())
+        s, etag = self.lecture()
+        self.assertFalse(self.worker.keep_judge_model_warm())          # DRAFT without audience
+        visitor = Client(HTTPApplication(self.service, 'backend'))
+        visitor.call('POST', '/api/v1/participations', {'join_code': s['join_code'], 'nickname': '청중', 'service_consent': True})
+        self.assertTrue(self.worker.keep_judge_model_warm())           # audience waiting: preload
+        self.api.call('PATCH', '/api/v1/sessions/' + s['session_id'], {'status': 'LIVE'}, headers={'if-match': etag})
+        self.assertTrue(self.worker.keep_judge_model_warm())
+        self.worker.trainer.fail = True
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            self.assertFalse(self.worker.keep_judge_model_warm())
+        self.assertIn('judge_model.keepalive_failed', stderr.getvalue())
+        self.assertNotIn('dev-only-trainer-key', stderr.getvalue())
+        self.assertEqual(len(calls), 3)
+
     def test_wrong_codes_commit_attempts_and_lock_after_five(self):
         user = self.register()
         record = self.row('SELECT * FROM email_verifications')
@@ -303,7 +366,9 @@ class APITests(unittest.TestCase):
         status, _, _ = self.auth.call('POST', '/api/v1/auth/email-verifications', {'email': 'member@example.com'})
         self.assertEqual(status, 202)
         self.assertIsNotNone(self.row('SELECT revoked_at FROM email_verifications WHERE verification_id=%s', (old['verification_id'],))['revoked_at'])
-        self.assertEqual(self.row("SELECT count(*) n FROM jobs WHERE status='CANCELLED'")['n'], 1)
+        # v1.4 grants: auth cannot UPDATE jobs; the old mail job stays and the worker skips the revoked code
+        # (tests/test_account.py checks the worker side).
+        self.assertEqual(self.row("SELECT count(*) n FROM jobs WHERE job_type='EMAIL_VERIFICATION'")['n'], 2)
 
     def test_mail_rate_returns_retry_after(self):
         self.register()
@@ -468,7 +533,8 @@ class APITests(unittest.TestCase):
         doc = self.row('SELECT * FROM documents')
         self.assertEqual(doc['status'], 'READY', doc)
         self.assertEqual(doc['page_count'], 2)
-        self.assertEqual(self.row('SELECT count(*) n FROM knowledge_chunks')['n'], 2)
+        # slides-v4: page 2 ('벡터 검색과 키워드 검색', 13 chars) is under slide_min_chars=20, so it yields no chunk.
+        self.assertEqual(self.row('SELECT count(*) n FROM knowledge_chunks')['n'], 1)
         self.assertEqual(self.api.call('GET', path)[0], 200)
         self.assertEqual(self.api.call('GET', first[2]['location'])[0], 200)
 
@@ -518,13 +584,16 @@ class APITests(unittest.TestCase):
         self.assertEqual(self.auth.call('POST', '/internal/v1/guest-sessions', {})[0], 403)
 
     def test_chunking_preserves_pages_and_embedding_shape(self):
-        result = chunks(['a' * 1000, 'second page'])
-        self.assertEqual([x['page_no'] for x in result], [1, 1, 2])
+        # retrieval.chunk_slides (slides-v4): a page over 400 tokens splits; a low-content page yields no chunk.
+        long_page = [' '.join(f'hash{i} collision vector search' for i in range(150))]
+        result = chunks([long_page, ['p. 2']], whitespace_spans)
+        self.assertEqual([x['page_no'] for x in result], [1, 1])
+        self.assertEqual([x['ordinal'] for x in result], [0, 1])
         with self.assertRaises(APIError):
             check_vectors([[float('nan')] * 768], 1)
         with self.assertRaises(APIError):
             check_vectors([[1.0] * 767], 1)
-        self.assertEqual(extract_pages('test.pptx', pptx(('First', 'Second'))), ['First', 'Second'])
+        self.assertEqual(extract_pages('test.pptx', pptx(('First', 'Second'))), [['First'], ['Second']])
         self.assertEqual(overlap_ratio('A B C D E F', 'a b c d e f'), 1.0)
 
     def test_final_hwp_boolean_guest_consent_example(self):
@@ -549,8 +618,9 @@ class APITests(unittest.TestCase):
         self.assertEqual(self.row('SELECT count(*) n FROM api_usage')['n'], 0)
         with self.db.transaction() as tx:
             tx.execute("UPDATE app_settings SET hard_cap_enabled=false WHERE setting_key='MONTHLY_API_BUDGET'")
-        self.worker.maintenance()
-        self.worker.run_one()
+        self.worker.maintenance()   # also enqueues the daily PURGE/CLEANUP and the hourly SYNC
+        while self.worker.run_one():
+            pass
         self.assertEqual(self.row('SELECT status FROM documents')['status'], 'READY')
         self.assertEqual(self.row('SELECT outcome FROM api_usage')['outcome'], 'SUCCESS')
 
@@ -715,7 +785,7 @@ class APITests(unittest.TestCase):
         self.service.job = original
 
     def test_real_pdf_parser_extracts_text_and_rejects_scan_without_text(self):
-        self.assertEqual(extract_pages('lecture.pdf', pdf()), ['Hash collision and vector search'])
+        self.assertEqual([[b.strip() for b in page] for page in extract_pages('lecture.pdf', pdf())], [['Hash collision and vector search']])
         with self.assertRaises(APIError) as error:
             extract_pages('scan.pdf', pdf(''))
         self.assertEqual(error.exception.code, 'DOCUMENT_NO_TEXT')

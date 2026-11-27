@@ -8,8 +8,8 @@ from easyq_common.contracts import APIError, dt, dumps, obj, uid
 
 from . import protocol
 from .audio import AudioStream
-from .protocol import (ACK_EVERY, EVERYONE, FRAME_HEADER, HOST_ONLY, IDLE_SECONDS, MAX_FRAME_BYTES, PING_SECONDS,
-                       RECHECK_SECONDS, CloseConnection, run_sync)
+from .protocol import (ACK_EVERY, ASKER_AND_HOST, ASKER_ONLY, EVERYONE, FRAME_HEADER, HOST_ONLY, IDLE_SECONDS,
+                       MAX_FRAME_BYTES, MEMBERS_AND_HOST, PING_SECONDS, RECHECK_SECONDS, CloseConnection, run_sync)
 
 
 # ----------------------------------------------------------- connection ----
@@ -84,11 +84,27 @@ class LiveConnection:
             return
         if kind == 'session.updated' and self.audio:
             self.state_wake.set()   # pause / STT consent withdrawal / end: re-check the stream right away
-        if kind in HOST_ONLY and self.role != 'HOST':
+        if not self.may_receive(kind, row):
             return
-        if kind not in HOST_ONLY and kind not in EVERYONE:
-            return  # question/answer events arrive with the v0.4+ question features
         self.outbox.put_nowait(self.envelope(kind, payload, row['event_id'], payload.get('version')))
+
+    def may_receive(self, kind, row):
+        """7.3.10 받는 대상. Asker events go only to the connection whose participant asked (from the question row,
+        never from client input); HOST gets only review events of its own lecture; unknown types go nowhere."""
+        host = self.role == 'HOST'
+        asker = row.get('asker_participant_id')
+        mine = bool(self.participant_id) and asker is not None and str(asker) == self.participant_id
+        if kind in HOST_ONLY:
+            return host
+        if kind in EVERYONE:
+            return True
+        if kind in ASKER_ONLY:
+            return mine
+        if kind in ASKER_AND_HOST:
+            return mine or host
+        if kind in MEMBERS_AND_HOST:
+            return host or bool(self.principal and self.principal['user_id'])
+        return False
 
     async def sender(self):
         while True:

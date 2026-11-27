@@ -4,7 +4,7 @@ import time
 from easyq_common.contracts import APIError, dumps, obj, uid
 
 from .budget import reserve, settle
-from .retrieval import chunks, check_vectors, extract_pages, keywords, overlap_ratio
+from .retrieval import chunks, check_vectors, extract_pages, keywords, overlap_ratio, page_text, slide_token_spans
 from .terms import extract_terms, merge_terms
 
 
@@ -17,7 +17,9 @@ class IngestJob:
         if not document or document['status'] == 'DELETING':
             raise APIError(409, 'RESOURCE_NOT_FOUND')
         pages = extract_pages(document['file_name'], self.service.storage.get(document['object_key']))
-        pieces = chunks(pages)
+        if self.token_spans is None:
+            self.token_spans = slide_token_spans(self.settings.chunk_tokenizer)
+        pieces = chunks(pages, self.token_spans)
         if not pieces:
             raise APIError(422, 'DOCUMENT_NO_TEXT')
         self.stage(job, 'INDEXING')
@@ -39,13 +41,16 @@ class IngestJob:
             vectors.extend(vector_batch)
         # 6.2.3 / API-25: term extraction is the last stage (UPLOADED → EXTRACTING → INDEXING → TERMS → READY).
         self.stage(job, 'TERMS')
-        document_terms = extract_terms(pages, self.tokenizer)
+        document_terms = extract_terms([page_text(p) for p in pages], self.tokenizer)
         with self.db.transaction() as tx:
             self.active(tx, job)
             lecture = tx.one('SELECT * FROM lecture_sessions WHERE session_id=%s FOR UPDATE', (job['session_id'],))
             current = tx.one('SELECT * FROM documents WHERE document_id=%s FOR UPDATE', (job['target_id'],))
             if not lecture or lecture['status'] not in ('DRAFT', 'LIVE') or not current or current['status'] == 'DELETING':
                 raise APIError(409, 'SESSION_STATE_CONFLICT')
+            if obj(job['payload']).get('retry'):
+                # API-23: a retry rebuilds from the original, so the previous attempt's chunks go first (worker owns DELETE).
+                tx.execute('DELETE FROM knowledge_chunks WHERE session_id=%s AND document_id=%s', (job['session_id'], job['target_id']))
             # Upsert stable source keys: lease reclaim or retry cannot duplicate chunks.
             for piece, vector in zip(pieces, vectors):
                 tx.execute("""INSERT INTO knowledge_chunks(chunk_id,session_id,document_id,source_type,source_key,page_no,
@@ -55,7 +60,7 @@ class IngestJob:
                     search_vector=excluded.search_vector,retrieval_config_version=excluded.retrieval_config_version,
                     index_status='READY',indexed_at=excluded.indexed_at""",
                     (uid(), job['session_id'], job['target_id'], f'{job["target_id"]}:{piece["page_no"]}:{piece["ordinal"]}',
-                     piece['page_no'], piece['content'], dumps(vector), keywords(piece['content'], self.tokenizer),
+                     piece['page_no'], piece['content'], dumps(vector), keywords(piece['content']),
                      self.settings.retrieval_version, self.service.clock(), self.service.clock()))
             tx.execute("UPDATE documents SET status='READY',stage=NULL,page_count=%s,chunk_count=%s,error_code=NULL,terms=%s WHERE document_id=%s",
                 (len(pages), len(pieces), dumps(document_terms), job['target_id']))
@@ -81,6 +86,10 @@ class IngestJob:
                 detection['manual_marked'] = bool(before.get('manual_marked'))
                 tx.execute('UPDATE lecture_sessions SET eval_detection=%s,is_eval_lecture=%s WHERE session_id=%s',
                     (dumps(detection), detected or detection['manual_marked'], job['session_id']))
+                if not (detected or detection['manual_marked']):
+                    # 6.1.6-5: the check finished, so create the candidates deferred while it was PENDING (event_key dedupes).
+                    from easyq_common.candidates import sweep_candidates
+                    sweep_candidates(self.service, tx, job['session_id'])
             else:
                 detection = obj(lecture['eval_detection'])
                 detection['check_status'] = 'PENDING'

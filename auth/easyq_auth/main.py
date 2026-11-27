@@ -11,6 +11,7 @@ ROUTES = [
     ('POST', '/auth/password-reset-requests', 'API-07', '비밀번호 재설정 메일 요청'),
     ('POST', '/auth/password-resets', 'API-08', '비밀번호 재설정'),
     ('GET', '/me', 'API-09', '현재 회원 조회: 로그인 복구 지원'),
+    ('PATCH', '/me', 'API-10', '표시명 · 비밀번호 변경 (비밀번호 변경 시 새 세션 쿠키, CSRF는 API-06)'),
 ]
 
 

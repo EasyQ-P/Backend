@@ -20,13 +20,12 @@ python -m pip install -r requirements.txt
 애플리케이션은 테이블을 만들지 않는다. 먼저 비어 있는 easyq DB를 준비하고 migration owner 계정으로 아래 파일을 한 번 적용한다. 이미 초기화한 DB에는 원본 CREATE TABLE SQL을 다시 실행하지 않는다.
 
 ```powershell
-psql $env:MIGRATION_DATABASE_URL -v ON_ERROR_STOP=1 -f '../DB 스키마파일/easyq_schema_v1.2.sql'
-psql $env:MIGRATION_DATABASE_URL -v ON_ERROR_STOP=1 -f 'migrations/001_auth_session_view.sql'
+psql $env:MIGRATION_DATABASE_URL -v ON_ERROR_STOP=1 -f 'DB 스키마파일/easyq_schema_v1.4.sql'   # 인증 뷰 포함
 ```
 
 `easyq_training_registry_v1.2.sql`은 학과 서버의 별도 레지스트리 DB용이다. 서비스 DB에 이어서 실행하지 않는다. 서비스 DB 초기화에는 vector 확장을 생성할 수 있는 권한이 필요하다.
 
-auth/backend/worker의 DB LOGIN 역할을 따로 만들고 `002_runtime_grants.example.sql`을 실제 역할명에 맞춰 적용한다. 런타임 계정에 migration owner나 슈퍼유저 권한을 주지 않는다. RDS에서는 같은 VPC와 EC2 보안 그룹으로만 5432 접근을 허용하고 DSN에 인증서 검증을 설정한다.
+auth/backend/worker의 DB LOGIN 역할을 따로 만들고 `migrations/002_runtime_grants.sql`(v1.4 권한표)을 적용한다. 런타임 계정에 migration owner나 슈퍼유저 권한을 주지 않는다. RDS에서는 같은 VPC와 EC2 보안 그룹으로만 5432 접근을 허용하고 DSN에 인증서 검증을 설정한다.
 
 ## 3. 환경 설정
 

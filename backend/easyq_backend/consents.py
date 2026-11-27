@@ -35,10 +35,10 @@ class ConsentsMixin:
                 self.event(tx, 'session.updated', {'stt_status': 'STOPPED'}, sid)
             if sid and purpose == 'SERVICE':
                 if owner:
+                    # v1.4: a LIVE lecture ends (end_reason HOST, no If-Match); a DRAFT stays, and API-16 refuses to
+                    # start it with 403 CONSENT_REQUIRED until SERVICE is granted again.
                     if s['status'] == 'LIVE':
-                        self.end(tx, s)
-                    else:
-                        raise APIError(409, 'SESSION_STATE_CONFLICT')
+                        self.end(tx, s, 'HOST')
                 else:
                     g = self.participant(tx, sid, p)
                     tx.execute("UPDATE participants SET status='REVOKED' WHERE participant_id=%s", (g['participant_id'],))

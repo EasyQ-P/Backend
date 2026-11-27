@@ -1,8 +1,8 @@
 {
-  "executed_at_utc": "2026-11-27T03:13:52.707641+00:00",
-  "duration_seconds": 238.157,
-  "total": 307,
-  "passed": 307,
+  "executed_at_utc": "2026-11-27T14:34:44.144008+00:00",
+  "duration_seconds": 445.146,
+  "total": 315,
+  "passed": 315,
   "failed": 0,
   "errors": 0,
   "skipped": 0,
@@ -702,6 +702,10 @@
       "status": "passed"
     },
     {
+      "test": "tests.test_postgres.PostgreSQLTests.test_keyword_vector_keeps_rc_v1_tokens_verbatim",
+      "status": "passed"
+    },
+    {
       "test": "tests.test_postgres.PostgreSQLTests.test_lecture_creation_matches_final_design_and_state_start_needs_no_document",
       "status": "passed"
     },
@@ -1195,6 +1199,34 @@
     },
     {
       "test": "tests.test_questions.QuestionTests.test_votes_count_once_and_only_on_live_escalated_questions",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_replay.ReplayTests.test_early_stopped_stream_is_not_recorded",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_replay.ReplayTests.test_embedder_calls_only_for_unrecorded_texts",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_replay.ReplayTests.test_live_mode_is_rejected_as_a_store",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_replay.ReplayTests.test_llm_complete_records_once_then_replays_without_calling",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_replay.ReplayTests.test_llm_stream_replays_chunks_and_honours_early_stop",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_replay.ReplayTests.test_replay_miss_raises_and_never_calls_the_provider",
+      "status": "passed"
+    },
+    {
+      "test": "tests.test_replay.ReplayTests.test_stt_records_finals_relative_to_stream_start_and_replays_them_in_time",
       "status": "passed"
     },
     {

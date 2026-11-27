@@ -20,9 +20,15 @@ class Settings:
     embedding_model: str = ""
     stt_model: str = ""
     stt_api_key: str = ""
-    retrieval_version: str = "easyq-v0.3-768-c800-o100"
+    # Search config version (rc-vN, set by the AI team). The evaluation-lecture check runs only when the imported
+    # evaluation chunks carry the same version (EVAL_REFERENCE_RETRIEVAL_VERSION).
+    retrieval_version: str = "rc-v1"
     # Slide chunk token counter (retrieval chunk_slides, rc-v1): Hugging Face id or local tokenizer.json path.
     chunk_tokenizer: str = "BAAI/bge-reranker-v2-m3"
+    # Record / replay of provider calls for low-cost tests (easyq_common.replay): live | record | replay.
+    provider_mode: str = "live"
+    provider_store: str = "./var/provider-store"
+    provider_stt_recording: str = "default"
     # Training server (7.4) through the SSH tunnel; empty disables calls (judge-model keepalive, 6.4.14).
     training_api_base_url: str = ""
     training_api_key: str = ""
@@ -82,6 +88,9 @@ class Settings:
             reference_version=os.environ.get('EVAL_REFERENCE_VERSION', ''),
             reference_retrieval_version=os.environ.get('EVAL_REFERENCE_RETRIEVAL_VERSION', ''),
             chunk_tokenizer=os.environ.get('CHUNK_TOKENIZER', 'BAAI/bge-reranker-v2-m3'),
+            provider_mode=os.environ.get('PROVIDER_MODE', 'live'),
+            provider_store=os.environ.get('PROVIDER_STORE', './var/provider-store'),
+            provider_stt_recording=os.environ.get('PROVIDER_STT_RECORDING', 'default'),
             training_api_base_url=os.environ.get('TRAINING_API_BASE_URL', ''),
             training_api_key=os.environ.get('TRAINING_API_KEY', ''),
             worker_internal_key=os.environ.get('WORKER_SERVICE_KEY', ''),

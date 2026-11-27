@@ -4,7 +4,7 @@ import time
 from easyq_common.contracts import APIError, dt, dumps
 
 from .budget import reserve, settle
-from .retrieval import check_vectors, keywords
+from .retrieval import check_vectors, keyword_vector
 
 
 class TranscriptJob:
@@ -31,9 +31,9 @@ class TranscriptJob:
             if not lecture or lecture['status'] not in ('DRAFT', 'LIVE', 'ENDED'):
                 raise APIError(409, 'SESSION_STATE_CONFLICT')
             moment = self.service.clock()
-            tx.execute("""UPDATE knowledge_chunks SET embedding=%s::vector,search_vector=to_tsvector('simple',%s),
+            tx.execute("""UPDATE knowledge_chunks SET embedding=%s::vector,search_vector=%s::tsvector,
                 retrieval_config_version=%s,index_status='READY',indexed_at=%s WHERE session_id=%s AND chunk_id=%s""",
-                (dumps(vector), keywords(chunk['content']), self.settings.retrieval_version, moment,
+                (dumps(vector), keyword_vector(chunk['content']), self.settings.retrieval_version, moment,
                  job['session_id'], job['target_id']))
             lag = max(0, int((moment - dt(chunk['captured_at'])).total_seconds() * 1000))
             self.service.event(tx, 'stt.status', {'status': lecture['stt_status'], 'indexed_until_ms': chunk['end_ms'],

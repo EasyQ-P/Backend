@@ -67,7 +67,8 @@ class MemorySearch:
     def keyword_ids(self, tx, sid, tokens, limit=20):
         from retrieval.keyword import BM25Index
         rows = tx.all("SELECT chunk_id,search_vector FROM knowledge_chunks WHERE session_id=%s AND index_status='READY'", (sid,))
-        return [i for i, _ in BM25Index({str(r['chunk_id']): r['search_vector'].split() for r in rows}).search(tokens, limit)]
+        from easyq_worker.retrieval import vector_tokens
+        return [i for i, _ in BM25Index({str(r['chunk_id']): vector_tokens(r['search_vector']) for r in rows}).search(tokens, limit)]
 
 
 class QAWorkerTests(APIBase):

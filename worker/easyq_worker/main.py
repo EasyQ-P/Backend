@@ -13,7 +13,13 @@ def main():
     from .worker import Worker
     s = Settings.from_env()
     service = ServiceCore(Database(s.database_url), s, storage_from(s), AuthClient(s, worker=True))
-    worker = Worker(service, GeminiEmbedder(s), Mailer(s))
+    from easyq_common.replay import RecordedEmbedder, RecordedLLM, store_from
+    from .llm import AnthropicLLM
+    store = store_from(s)   # PROVIDER_MODE=record|replay: Claude and embeddings go through the recording store
+    embedder = GeminiEmbedder(s) if store is None else RecordedEmbedder(GeminiEmbedder(s), store, s.embedding_model)
+    worker = Worker(service, embedder, Mailer(s))
+    if store is not None:
+        worker.llm = RecordedLLM(AnthropicLLM(s), store)
     last = 0
     while True:
         try:

@@ -4,7 +4,7 @@ import time
 from easyq_common.contracts import APIError, dumps, obj, uid
 
 from .budget import reserve, settle
-from .retrieval import chunks, check_vectors, extract_pages, keywords, overlap_ratio, page_text, slide_token_spans
+from .retrieval import chunks, check_vectors, extract_pages, keyword_vector, overlap_ratio, page_text, slide_token_spans
 from .terms import extract_terms, merge_terms
 
 
@@ -55,12 +55,12 @@ class IngestJob:
             for piece, vector in zip(pieces, vectors):
                 tx.execute("""INSERT INTO knowledge_chunks(chunk_id,session_id,document_id,source_type,source_key,page_no,
                     content,embedding,search_vector,retrieval_config_version,index_status,captured_at,indexed_at)
-                    VALUES(%s,%s,%s,'DOCUMENT',%s,%s,%s,%s::vector,to_tsvector('simple',%s),%s,'READY',%s,%s)
+                    VALUES(%s,%s,%s,'DOCUMENT',%s,%s,%s,%s::vector,%s::tsvector,%s,'READY',%s,%s)
                     ON CONFLICT(session_id,source_key) DO UPDATE SET content=excluded.content,embedding=excluded.embedding,
                     search_vector=excluded.search_vector,retrieval_config_version=excluded.retrieval_config_version,
                     index_status='READY',indexed_at=excluded.indexed_at""",
                     (uid(), job['session_id'], job['target_id'], f'{job["target_id"]}:{piece["page_no"]}:{piece["ordinal"]}',
-                     piece['page_no'], piece['content'], dumps(vector), keywords(piece['content']),
+                     piece['page_no'], piece['content'], dumps(vector), keyword_vector(piece['content']),
                      self.settings.retrieval_version, self.service.clock(), self.service.clock()))
             tx.execute("UPDATE documents SET status='READY',stage=NULL,page_count=%s,chunk_count=%s,error_code=NULL,terms=%s WHERE document_id=%s",
                 (len(pages), len(pieces), dumps(document_terms), job['target_id']))

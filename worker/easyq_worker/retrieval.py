@@ -77,10 +77,35 @@ def check_vectors(values, count):
 
 
 def keywords(value):
-    """Keyword tokens by the shared rule (rc-v1 tokenize_keywords), space-joined for to_tsvector('simple').
-    Search scores them with BM25 over the same lecture's READY chunks (6.1.5); positions keep term frequency."""
+    """Keyword tokens by the shared rule (rc-v1 tokenize_keywords), in order. Search scores them with BM25 over the same
+    lecture's READY chunks (6.1.5)."""
     from retrieval.keyword import tokenize_keywords
-    return ' '.join(tokenize_keywords(value))
+    return list(tokenize_keywords(value))
+
+
+def keyword_vector(value):
+    """search_vector literal for `%s::tsvector`: every rc-v1 token kept verbatim with its positions.
+
+    to_tsvector('simple', ...) would re-split tokens the shared tokenizer keeps whole (C++ -> c, O(n) -> o, n,
+    e-mail -> e-mail, e, mail), so the stored terms, term frequencies and chunk lengths would differ from
+    retrieval.keyword.BM25Index. A tsvector literal is stored exactly as written (no parsing or normalisation)."""
+    positions = {}
+    for n, token in enumerate(keywords(value), 1):
+        positions.setdefault(token, []).append(min(n, 16383))   # PostgreSQL position limit
+    return ' '.join("'" + token.replace('\\', '\\\\').replace("'", "''") + "':" + ','.join(map(str, places[:256]))
+                    for token, places in positions.items())
+
+
+def vector_tokens(literal):
+    """Tokens of a keyword_vector literal back in position order (the SQLite test harness stores the literal as text)."""
+    import re
+    if "'" not in (literal or ''):
+        return (literal or '').split()
+    placed = []
+    for token, places in re.findall(r"'((?:[^']|'')*)':([0-9,]+)", literal):
+        token = token.replace("''", "'").replace('\\\\', '\\')
+        placed.extend((int(n), token) for n in places.split(','))
+    return [token for _, token in sorted(placed)]
 
 
 def normalized(value):

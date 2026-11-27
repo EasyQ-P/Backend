@@ -99,7 +99,7 @@ REG = {
                            'test_use_count': 0, 'change_note': 'mock initial dataset', 'created_at': '2026-11-01T09:00:00+09:00'}},
     'merges': {}, 'jobs': {}, 'models': {}, 'evaluations': {},
     'deployment': {'mode': 'LLM_ONLY', 'serving_version': None, 'previous_version': None, 'threshold': None,
-                   'llm_only_threshold': 70, 'llm_model_id': 'claude-sonnet-mock', 'llm_prompt_version': 'llm-only-v1',
+                   'llm_only_threshold': 70, 'llm_model_id': 'claude-sonnet-5-5', 'llm_prompt_version': 'llm-only-v1',
                    'deployed_at': '2026-11-01T09:00:00+09:00'},
 }
 
@@ -124,7 +124,7 @@ def _advance(job):
             'roc_auc': {'value': 0.88, 'ci_low': 0.85, 'ci_high': 0.91}, 'pair_roc_auc': 0.91,
             'service_metrics': {'retrieval_success_rate': 0.88},
             'baselines': [{'evaluator': 'SONNET_ONLY', 'roc_auc': 0.83, 'threshold': 70}],
-            'llm_only': {'threshold': 70, 'llm_model_id': 'claude-sonnet-mock', 'llm_prompt_version': 'llm-only-v1'}, 'test_use_count': 1}
+            'llm_only': {'threshold': 70, 'llm_model_id': 'claude-sonnet-5-5', 'llm_prompt_version': 'llm-only-v1'}, 'test_use_count': 1}
         REG['models'][version] = {
             'model_version': version, 'dataset_version': job['dataset_version'], 'test_set_version': 'test-v1',
             'roc_auc': 0.88, 'false_answer_rate': 0.042, 'tpr': 0.61, 'threshold': 0.62, 'precision_auc_drop': 0.002,

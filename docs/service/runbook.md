@@ -1,4 +1,4 @@
-# EasyQ v0.3 실행 안내
+# EasyQ 실행 안내 (설계 v1.4)
 
 ## 0. 프론트 연동용 로컬 개발 서버
 
@@ -96,6 +96,22 @@ python scripts/run_tests.py
 ```
 
 동일 API 테스트가 PostgreSQL에서도 실행되고 원본 SQL·뷰 migration을 그대로 검증한다. 테스트마다 `easyq_test_<random>` 스키마를 만들고 종료 시 그 스키마만 삭제한다. 운영 DB를 이 변수에 지정하지 않는다.
+
+## 5-1. 녹화 · 재생 시험 (외부 API 비용 절감)
+
+강의 하나 · 질문 세트를 고정해 Claude · 임베딩 · STT 응답을 한 번만 받아 저장하고, 이후에는 저장본으로 시험한다(2026-11-27 AI팀과 합의). 구현: `common/easyq_common/replay.py`.
+
+| 설정 | 값 |
+|---|---|
+| `PROVIDER_MODE` | `live`(기본, 사용 안 함) · `record`(저장본이 있으면 쓰고, 없으면 실제로 한 번 호출해 저장) · `replay`(저장본만. 없으면 실제 호출 없이 오류) |
+| `PROVIDER_STORE` | 저장 폴더. 교안 · 발화 · 답변 원문이 들어가므로 레포 밖(기본 `var/provider-store`, git 제외)에 둔다 |
+| `PROVIDER_STT_RECORDING` | STT 녹화 이름. 음성은 흐름으로 들어오므로 녹화마다 이름을 붙인다(예: `ocw-6.006-l02`) |
+
+- 키: Claude는 (모델, system, prompt, max_tokens), 임베딩은 (모델, 작업 종류, 문장)의 SHA-256. 프롬프트가 한 글자라도 바뀌면 다른 키라서 다시 녹화해야 한다.
+- STT 재생은 음성 내용을 보지 않고, 녹화한 발화를 스트림 시작 기준 시각에 맞춰 내보낸다. 같은 녹음 파일을 다시 보내면 된다.
+- 재생 중 녹화에 없는 요청은 `replay.miss` 로그(종류 · 키만, 원문 없음)를 남기고 실패한다. 질문은 PROVIDER_FAILURE로 이관된다.
+- 순서: `PROVIDER_MODE=record`로 강의 · 질문 세트를 한 번 돌린다 → 저장 폴더를 보관 → 이후 `PROVIDER_MODE=replay`로 반복 시험.
+- docker compose는 `./var/provider-store`를 backend · worker에 바인드 마운트한다. Linux에서는 컨테이너 사용자(uid 10001)가 쓸 수 있게 폴더 권한을 맞춘다.
 
 ## 6. 실제 서비스 연결 확인 순서
 

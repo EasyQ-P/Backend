@@ -132,7 +132,7 @@ AI팀(엄윤종 · 최의찬)에서 받은 개발 규칙과, AI 레포 · 학습
 | 정리 규칙 | 없음 | 저작권 줄 → 깨진 줄 → 내용 적은 쪽 판정(1.4~1.6) |
 | PPTX | 슬라이드 본문만 | 그대로 유지(노트 제외) |
 | `retrieval.py` 자체 | 이 레포에 직접 구현 | AI 레포 `retrieval` 패키지를 태그로 설치해 호출(4.1) |
-| `Settings.retrieval_version` | `easyq-v0.3-768-c800-o100` | AI팀이 정한 rc-vN 사용 |
+| `Settings.retrieval_version` | `rc-v1` (2026-11-27 AI팀 요청으로 변경) | AI팀이 정한 rc-vN 사용 |
 
 ## 6. AI팀에 확인할 것
 

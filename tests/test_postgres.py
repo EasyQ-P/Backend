@@ -93,6 +93,16 @@ class PostgresMixin:
 
 @unittest.skipUnless(PG_DSN, 'PostgreSQL DSN not configured')
 class PostgreSQLTests(PostgresMixin, test_api.APITests):
+    def test_keyword_vector_keeps_rc_v1_tokens_verbatim(self):
+        """to_tsvector('simple') would split C++ / O(n) / e-mail; the literal keeps them, with term frequencies (AI #5)."""
+        from easyq_worker.retrieval import keyword_vector
+        with self.db.transaction() as tx:
+            row = tx.one("SELECT %s::tsvector AS v", (keyword_vector('C++ O(n) e-mail a_b C++'),))
+            lexemes = {r['lexeme']: r['n'] for r in tx.all(
+                'SELECT lexeme, array_length(positions,1) AS n FROM unnest(%s::tsvector)', (row['v'],))}
+            self.assertEqual(lexemes, {'c++': 2, 'o(n)': 1, 'e-mail': 1, 'a_b': 1})
+            self.assertTrue(tx.one("SELECT %s::tsvector @@ %s::tsquery AS hit", (row['v'], "'c++' | 'nothing'"))['hit'])
+
     def test_native_postgresql_indexes(self):
         with self.db.transaction() as tx:
             indexes = tx.all('SELECT indexdef FROM pg_indexes WHERE schemaname=%s', (self.schema,))

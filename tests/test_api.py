@@ -296,9 +296,14 @@ class APITests(APIBase):
         self.assertEqual((status, payload['error']['code']), (403, 'CONSENT_REQUIRED'))
 
     def test_keyword_index_uses_rc_v1_tokens(self):
-        from easyq_worker.retrieval import keywords
+        from easyq_worker.retrieval import keyword_vector, keywords, vector_tokens
         # Fake Kiwi: ASCII words are SL (lower-cased by tokenize_keywords), other words NNG.
-        self.assertEqual(keywords('Hash 충돌은 처리'), 'hash 충돌은 처리')
+        self.assertEqual(keywords('Hash 충돌은 처리'), ['hash', '충돌은', '처리'])
+        # Stored verbatim with positions; quotes and backslashes escaped; repeats keep every position.
+        self.assertEqual(keyword_vector('Hash 처리 hash'), "'hash':1,3 '처리':2")
+        literal = keyword_vector("c++ o(n) it's a\\b c++")
+        self.assertEqual(literal, "'c++':1,5 'o(n)':2 'it''s':3 'a\\\\b':4")
+        self.assertEqual(vector_tokens(literal), ['c++', 'o(n)', "it's", 'a\\b', 'c++'])
 
     def test_judge_model_keepalive_only_while_lectures_need_it(self):
         # 6.4.14 lease: called while a lecture is LIVE or a DRAFT lecture has audience; never logs the API key.

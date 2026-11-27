@@ -48,6 +48,11 @@ x-env: &env
   EMBEDDING_MAX_BATCH_COST_USD: ${EMBEDDING_MAX_BATCH_COST_USD:-}
   EMBEDDING_PRICE_VERSION: ${EMBEDDING_PRICE_VERSION:-}
   CHUNK_TOKENIZER: ${CHUNK_TOKENIZER:-BAAI/bge-reranker-v2-m3}
+  # Record/replay of Claude · embedding · STT calls for low-cost tests (docs/service/runbook.md):
+  # PROVIDER_MODE=record calls a provider once and stores the answer; replay never calls (missing = error).
+  PROVIDER_MODE: ${PROVIDER_MODE:-live}
+  PROVIDER_STORE: /app/var/provider-store
+  PROVIDER_STT_RECORDING: ${PROVIDER_STT_RECORDING:-default}
   TRAINING_API_BASE_URL: ${TRAINING_API_BASE_URL:-http://trainer-mock:9000/api/v1}
   TRAINING_API_KEY: ${TRAINING_API_KEY:-dev-only-trainer-key}
 
@@ -107,7 +112,7 @@ services:
     environment:
       <<: *env
       DATABASE_URL: postgresql://easyq_backend:easyq_backend_dev@db:5432/easyq
-    volumes: [./common:/app/common, ./backend:/app/backend, objects:/app/var/objects]
+    volumes: [./common:/app/common, ./backend:/app/backend, objects:/app/var/objects, ./var/provider-store:/app/var/provider-store]
     ports: ["127.0.0.1:${BACKEND_PORT:-8000}:8000"]
     depends_on: {db: {condition: service_healthy}, auth: {condition: service_started}}
 
@@ -121,7 +126,8 @@ services:
       DATABASE_URL: postgresql://easyq_worker:easyq_worker_dev@db:5432/easyq
       INTERNAL_SERVICE_KEY: dev-only-worker-key-0123456789abcdefghijklm   # worker may only call INT-02
     # hfcache keeps the chunk tokenizer (CHUNK_TOKENIZER, downloaded on the first INGEST) across restarts.
-    volumes: [./common:/app/common, ./worker:/app/worker, objects:/app/var/objects, hfcache:/home/easyq/.cache]
+    volumes: [./common:/app/common, ./worker:/app/worker, objects:/app/var/objects, hfcache:/home/easyq/.cache,
+              ./var/provider-store:/app/var/provider-store]
     depends_on: {db: {condition: service_healthy}, mailpit: {condition: service_started}}
 
   # One-off: test accounts member@easyq.local / easyq2026 and admin@easyq.local / admin2026 (kept if they exist).

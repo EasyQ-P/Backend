@@ -47,7 +47,8 @@ compose.yaml              로컬 개발: 이미지에는 라이브러리만, 코
 common/easyq_common/      세 컨테이너 공용: core.py(ServiceCore: 실행 · 세션 확인 · CSRF · 동의 · 이벤트 · 작업 · 요청 한도 ·
                           강연 접근 · 강연 종료 · 중복 요청 키), contracts, security, config, db, http(ASGI 전송 · OpenAPI),
                           schemas(Swagger), storage(S3 · 로컬), auth_client(INT-01~03 호출), trainer(학습서버 7.4 고정 어댑터 ·
-                          현재 서빙 설정), candidates(라벨 후보 생성 · 재확인, backend · worker 공용)
+                          현재 서빙 설정), candidates(라벨 후보 생성 · 재확인, backend · worker 공용),
+                          replay(외부 API 녹화 · 재생 시험, PROVIDER_MODE)
 auth/                     인증 컨테이너(내부 8000, 개발 :8001) — Dockerfile, requirements.txt
   easyq_auth/             main(앱), accounts(가입 · 인증 · 로그인 · 재설정 · API-10), sessions(세션 · auth 경로 · 내부 API),
                           admin(ADMIN 생성 명령), devseed(개발 테스트 계정)

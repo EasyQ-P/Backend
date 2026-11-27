@@ -41,4 +41,4 @@ python -m pip install -r common/requirements.txt -r auth/requirements.txt -r bac
 python scripts/run_tests.py   # 레포 루트에서, 결과는 docs/service/test-results.json
 ```
 
-오프라인 테스트는 SQLite 하네스와 가짜 외부 연동(Claude · 학습서버 · 임베딩 · STT · 메일)으로 실제 서비스 · worker 코드를 실행합니다. `EASYQ_TEST_DATABASE_URL`(이름이 `_test`로 끝나는 DB)을 주면 같은 시험을 PostgreSQL 16 + pgvector에서도 돌리고, `EASYQ_TEST_ROLES=1`을 더하면 v1.4 권한을 적용해 auth · backend · worker를 각자의 DB 계정으로 실행합니다. 2026-11-27: SQLite와 PostgreSQL(권한 적용) 합계 307개 모두 통과, 권한 오류 0건. 자세한 절차는 [docs/service/runbook.md](docs/service/runbook.md), 구현 설명은 [docs/service/implementation-v1.4.md](docs/service/implementation-v1.4.md)를 참고하세요.
+오프라인 테스트는 SQLite 하네스와 가짜 외부 연동(Claude · 학습서버 · 임베딩 · STT · 메일)으로 실제 서비스 · worker 코드를 실행합니다. `EASYQ_TEST_DATABASE_URL`(이름이 `_test`로 끝나는 DB)을 주면 같은 시험을 PostgreSQL 16 + pgvector에서도 돌리고, `EASYQ_TEST_ROLES=1`을 더하면 v1.4 권한을 적용해 auth · backend · worker를 각자의 DB 계정으로 실행합니다. 2026-11-27: SQLite와 PostgreSQL(권한 적용) 합계 315개 모두 통과, 권한 오류 0건. 자세한 절차는 [docs/service/runbook.md](docs/service/runbook.md), 구현 설명은 [docs/service/implementation-v1.4.md](docs/service/implementation-v1.4.md)를 참고하세요.

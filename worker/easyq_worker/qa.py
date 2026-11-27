@@ -62,9 +62,8 @@ class PostgresSearch:
     def keyword_ids(self, tx, sid, tokens, limit=20):
         if not tokens:
             return []
-        terms = []
-        for r in tx.all("SELECT lexeme, coalesce(array_length(positions,1),1) AS n FROM unnest(to_tsvector('simple',%s))", (' '.join(tokens),)):
-            terms.extend([r['lexeme']] * r['n'])
+        # Query tokens are matched verbatim, exactly as keyword_vector stored them (no to_tsvector re-splitting).
+        terms = [t for t in tokens if t]
         lexemes = sorted(set(terms))
         if not lexemes:
             return []
@@ -157,9 +156,7 @@ class QAJob:
         first deployment the mode is CUSTOM and the LLM_ONLY values come from configuration (review A-4)."""
         snap = active_serving(tx) or {}   # one reader shared with the admin side (easyq_common.trainer)
         s = self.settings
-        threshold = snap.get('llm_only_threshold')
-        if isinstance(threshold, (int, float)) and 0 < threshold <= 1:
-            threshold = threshold * 100   # 7.4.21 examples give τ_LLM as 0~1; the LLM score here is 0~100
+        threshold = snap.get('llm_only_threshold')   # τ_LLM on the same 0~100 scale as the LLM score (agreed with AI 2026-11-27)
         return {'mode': snap.get('mode') or 'CUSTOM',
                 'llm_only_threshold': float(threshold) if isinstance(threshold, (int, float)) else float(s.llm_only_threshold),
                 'llm_model_id': snap.get('llm_model_id') or s.llm_model,

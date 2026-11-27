@@ -34,7 +34,7 @@ class Service(AuthService, BackendService):
 class SQLiteTx(Tx):
     def execute(self, sql, args=()):
         sql = re.sub(r'\s+FOR UPDATE(?: SKIP LOCKED)?', '', sql, flags=re.I)
-        sql = sql.replace('%s', '?').replace('::vector', '').replace('::jsonb', '')
+        sql = sql.replace('%s', '?').replace('::tsvector', '').replace('::vector', '').replace('::jsonb', '')
         args = tuple(v.isoformat() if isinstance(v, datetime) else v for v in args)
         return self.connection.execute(sql, args)
 

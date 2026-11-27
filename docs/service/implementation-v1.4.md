@@ -91,6 +91,15 @@
 - 모델 동기화(검토 D-4): 7.4.17 · 18에 `artifact_uri`가 없어 `/home/t26112/easyq-data/models/<버전>/`를 넣고, sha256이 없으면 0 64자리.
 - 운영 지표(API-64)는 서울 날짜 기준. 학습 실행 목록 API(검토 P-2)는 추가하지 않았다.
 
+## 3-1. AI팀 요청 반영 (2026-11-27)
+
+- **키워드 토큰을 그대로 저장:** `to_tsvector('simple', …)`가 rc-v1 토큰을 다시 쪼개는 것을 PostgreSQL에서 확인했다(C++→c, C#→c, O(n)→o·n, a_b→a·b, e-mail→e-mail·e·mail). 이제 `retrieval.keyword_vector()`가 토큰과 위치로 tsvector 값을 직접 만들어 `%s::tsvector`로 저장하고(교안 · 발화 색인), 질문 검색도 토큰을 그대로 비교한다. 그래서 단어 빈도와 조각 길이가 `BM25Index`와 같다. 이전에 색인한 조각은 다시 색인해야 한다.
+- **검색 설정 이름:** `retrieval_version` 기본값을 `rc-v1`로 바꿨다. 평가용 강의 검사는 평가용 교안 조각의 검색 설정 버전이 같아야 돈다.
+- **τ_LLM 단위:** LLM 점수와 같은 0~100으로 통일했다. 0~1 값을 100배 하던 임시 변환은 지웠다(설계서 7.4.21 표기는 AI팀이 고친다).
+- **모델 ID:** Claude Sonnet 5.5는 날짜 붙은 ID가 따로 없고 `claude-sonnet-5-5` 자체가 고정 ID다. `LLM_MODEL`로 정하고 판정 기록(`llm_model_id`)에 남긴다. 학습서버 목업의 서빙 설정도 이 ID로 맞췄다.
+- **녹화 · 재생 시험:** `PROVIDER_MODE=record|replay`(실행 안내 5-1).
+- **LLM_ONLY 판정 프롬프트:** 지금은 `qa.py`의 `JUDGE_SYSTEM`과 임시 τ 70. retrieval-v0.1.0 태그에 `llm-only-v1`이 들어오면 그 프롬프트를 불러 쓰도록 바꾼다(버전은 고치지 않고 v2로 새로 만든다는 규칙).
+
 ## 4. 시험
 
 - SQLite 하네스 + PostgreSQL 16(pgvector). PostgreSQL은 `EASYQ_TEST_ROLES=1`이면 v1.4 권한을 시험 스키마에 적용하고 auth · backend 요청과 worker 작업을 각자의 최소 권한 계정으로 실행한다.

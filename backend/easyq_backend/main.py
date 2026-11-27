@@ -39,8 +39,12 @@ def create_app(service=None, stt_factory=None):
         settings = Settings.from_env()
         service = BackendService(Database(settings.database_url), settings, storage_from(settings), AuthClient(settings))
     if stt_factory is None:
+        from easyq_common.replay import RecordedSTT, store_from
         from .stt import GeminiLiveSTT
         stt_factory = GeminiLiveSTT(service.settings)
+        store = store_from(service.settings)   # PROVIDER_MODE=record|replay (easyq_common.replay)
+        if store is not None:
+            stt_factory = RecordedSTT(stt_factory, store, service.settings.provider_stt_recording)
     hub = EventHub(service)
 
     @asynccontextmanager

@@ -10,9 +10,28 @@ from easyq_common.security import (credential_hash, encrypt, password_hash,
                                    password_matches, token, valid_password)
 
 
+def deliverable_email(value):
+    """API-01 address check with the rules fastapi-mail applies when the worker sends (email-validator):
+    special-use domains such as .local/.test/.localhost are rejected up front instead of failing every mail job.
+    Login and other endpoints keep the lenient email() check so existing accounts still work."""
+    from email_validator import EmailNotValidError, validate_email
+    address = email(value)
+    try:
+        validate_email(address, check_deliverability=False)
+    except EmailNotValidError:
+        raise APIError(422, 'VALIDATION_ERROR') from None
+    return address
+
+
 class AccountsMixin:
     def mail_rate(self, tx, address, ip):
+        self.mail_ip_rate(tx, ip)
+        self.mail_email_rate(tx, address)
+
+    def mail_ip_rate(self, tx, ip):
         self.rate(tx, 'mail-ip', ip, 20)
+
+    def mail_email_rate(self, tx, address):
         self.rate(tx, 'mail-email', address, 5, gap=60)
 
     def user_public(self, tx, user):
@@ -41,7 +60,7 @@ class AccountsMixin:
     def register(self, tx, req):
         b = req.body
         fields(b, ['email', 'password', 'display_name', 'consents'], ['email', 'password', 'display_name', 'consents'])
-        address, name = email(b['email']), text(b['display_name'], 50)
+        address, name = deliverable_email(b['email']), text(b['display_name'], 50)
         if not valid_password(b['password']):
             raise APIError(422, 'VALIDATION_ERROR')
         fields(b['consents'], ['SERVICE', 'TRAINING'], ['SERVICE'])
@@ -49,10 +68,13 @@ class AccountsMixin:
         training = consent(b['consents'].get('TRAINING', {'policy_version': 'training-v1', 'granted': False}))
         if not service['granted']:
             raise APIError(422, 'CONSENT_REQUIRED')
-        self.mail_rate(tx, address, req.ip)
+        # IP limit first (an existing-address probe still counts), then the duplicate check, then the
+        # per-address 60-second/hourly limit, so a repeated sign-up gets EMAIL_ALREADY_EXISTS, not RATE_LIMITED.
+        self.mail_ip_rate(tx, req.ip)
         tx.lock('email:' + address)
         if tx.one('SELECT user_id FROM users WHERE email=%s', (address,)):
             raise APIError(409, 'EMAIL_ALREADY_EXISTS', commit=True)
+        self.mail_email_rate(tx, address)
         user_id = uid()
         tx.execute("INSERT INTO users(user_id,email,password_hash,display_name) VALUES(%s,%s,%s,%s)",
             (user_id, address, password_hash(b['password']), name))

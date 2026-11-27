@@ -38,6 +38,8 @@ docker compose down -v         # DB까지 지우고 처음부터
 | 관리자(ADMIN) | admin@easyq.local | admin2026 |
 
 - 로컬 개발 DB 전용 값이다. `PUBLIC_ORIGIN`이 localhost가 아니거나 `EASYQ_DEV_SEED=1`이 없으면 시드는 실행을 거부한다.
+- 이 두 계정은 로그인만 된다. `.local` 주소라 메일 라이브러리가 받는 주소로 거부해서, 비밀번호 재설정 메일은 가지 않는다.
+- 새로 가입해서 시험할 때는 `@example.com` 주소를 쓴다. `.local` · `.test` · `.localhost` 주소는 가입 단계에서 422 `VALIDATION_ERROR`로 거부된다(메일을 보낼 수 없는 주소라서). 보낸 메일은 Mailpit(http://localhost:8025)에서 본다.
 - 운영 관리자 계정은 서버에서 `python -m easyq.admin create --email … --display-name …`로만 만든다.
 
 ## 4. 요청 규칙 요약 (7.1.2)

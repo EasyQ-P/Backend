@@ -25,7 +25,7 @@ x-env: &env
   OBJECT_ROOT: /app/var/objects
   SMTP_HOST: mailpit
   SMTP_PORT: "1025"
-  SMTP_FROM: no-reply@easyq.local
+  SMTP_FROM: no-reply@example.com    # not .local/.test: fastapi-mail rejects special-use domains
   SMTP_STARTTLS: "false"
   SMTP_SSL_TLS: "false"
   FORWARDED_ALLOW_IPS: "*"             # only Caddy and the host reach these ports

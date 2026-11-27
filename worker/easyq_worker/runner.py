@@ -1,5 +1,6 @@
 """Job runner: claim with SKIP LOCKED, lease/heartbeat, finish, retry and failure codes, maintenance."""
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+import sys
 import threading
 
 from easyq_common.contracts import APIError, dt, dumps, obj, uid
@@ -33,6 +34,17 @@ class WorkerBase:
         if job_type == 'AUTH_REVOKE':
             return 'AUTH_SERVICE_UNAVAILABLE'
         return 'SERVICE_UNAVAILABLE'
+
+    def log_job_failure(self, job, internal, code, final, held, exc):
+        """One JSON line per failed attempt on stderr (8.3 common fields). Exception text is NOT written:
+        provider/SMTP messages can contain e-mail addresses or credentials; only the class name is kept."""
+        event = 'email.verification_failed' if job['job_type'] == 'EMAIL_VERIFICATION' else 'job.failed'
+        line = {'timestamp': datetime.now(timezone.utc).isoformat(), 'level': 'ERROR' if final else 'WARNING',
+                'service': 'worker', 'event': event, 'request_id': None, 'trace_id': None, 'code': code,
+                'message': 'job held' if held else ('job failed' if final else 'job will be retried'),
+                'meta': {'job_id': str(job['job_id']), 'job_type': job['job_type'], 'attempts': job['attempts'],
+                         'final': final, 'held': held, 'cause': internal, 'exception': type(exc).__name__}}
+        print(dumps(line), file=sys.stderr, flush=True)
 
     def record_failure(self, tx, job, code, final):
         if job['job_type'] == 'INGEST':
@@ -153,6 +165,7 @@ class WorkerBase:
                         month_bounds(self.service.clock())[1] if held else self.service.clock() + timedelta(seconds=30 * 2 ** (job['attempts'] - 1)), self.service.clock() if failed or held else None,
                         job['job_id'], job['lease_token']))
                     self.record_failure(tx, job, code, failed or held)
+                self.log_job_failure(job, internal, code, failed, held, exc)
         finally:
             stop.set()
             heartbeat.join(timeout=1)

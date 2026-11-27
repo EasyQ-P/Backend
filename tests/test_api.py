@@ -237,6 +237,39 @@ class APITests(unittest.TestCase):
             self.assertEqual(status, 422)
         self.assertEqual(self.auth.call('POST', '/api/v1/users', {}, headers={'origin': 'https://evil.test'})[0], 403)
 
+    def test_signup_rejects_special_use_domains_the_mailer_cannot_send_to(self):
+        # fastapi-mail (email-validator) refuses .local/.test/.localhost, so API-01 refuses them up front.
+        body = {'password': 'easyq2026', 'display_name': 'A', 'consents': {'SERVICE': {'policy_version': 'v1', 'granted': True}}}
+        for address in ['someone@easyq.local', 'someone@easyq.test', 'someone@localhost.localhost']:
+            status, payload, _ = self.auth.call('POST', '/api/v1/users', {**body, 'email': address})
+            self.assertEqual((status, payload['error']['code']), (422, 'VALIDATION_ERROR'), address)
+        self.assertEqual(self.row('SELECT count(*) n FROM users')['n'], 0)
+
+    def test_repeated_signup_within_sixty_seconds_reports_existing_email(self):
+        # Order: IP limit -> duplicate check -> per-address limit, so the duplicate wins over the 60-second gap.
+        self.register('again@example.com')
+        status, payload, _ = self.auth.call('POST', '/api/v1/users', {'email': 'again@example.com', 'password': 'easyq2026', 'display_name': 'A',
+            'consents': {'SERVICE': {'policy_version': 'v1', 'granted': True}}})
+        self.assertEqual((status, payload['error']['code']), (409, 'EMAIL_ALREADY_EXISTS'))
+
+    def test_failed_mail_job_is_logged_without_address_or_exception_text(self):
+        import io
+        from contextlib import redirect_stderr
+        self.register('logged@example.com')
+        def refuse(*message):
+            raise ValueError('logged@example.com is not deliverable')
+        self.mailer.send = refuse
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            self.worker.run_one()
+        lines = [obj(line) for line in stderr.getvalue().splitlines() if line.startswith('{')]
+        self.assertEqual(len(lines), 1, stderr.getvalue())
+        line = lines[0]
+        self.assertEqual((line['service'], line['event'], line['level']), ('worker', 'email.verification_failed', 'WARNING'))
+        self.assertEqual((line['meta']['job_type'], line['meta']['exception'], line['meta']['final']), ('EMAIL_VERIFICATION', 'ValueError', False))
+        self.assertTrue(line['code'])
+        self.assertNotIn('logged@example.com', stderr.getvalue())
+
     def test_wrong_codes_commit_attempts_and_lock_after_five(self):
         user = self.register()
         record = self.row('SELECT * FROM email_verifications')

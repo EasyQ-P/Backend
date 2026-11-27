@@ -1,1 +1,3 @@
-# auth container: nothing beyond common/requirements.txt (password hashing uses hashlib.scrypt).
+# auth container: password hashing uses hashlib.scrypt (stdlib).
+# Sign-up addresses are checked with the same rules fastapi-mail applies in the worker (special-use domains rejected).
+email-validator>=2,<3
